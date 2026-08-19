@@ -8,3 +8,4 @@ data/*.sqlite-shm
 .env*.local
 next-env.d.ts
 npm-debug.log*
+*.tsbuildinfo

@@ -5,6 +5,7 @@ const TENURE_LABELS: Record<TenureValue, string> = {
   share_of_freehold: "Share of freehold",
   leasehold: "Leasehold",
   freehold: "Freehold",
+  shared_ownership: "Shared ownership",
 };
 
 export default function ListingsGrid({ listings }: { listings: Listing[] }) {

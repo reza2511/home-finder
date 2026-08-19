@@ -1,6 +1,12 @@
 import type { SourceAdapter } from "./types";
 import { barrattLondonAdapter } from "./barrattLondon";
 import { taylorWimpeyLondonAdapter } from "./taylorWimpeyLondon";
+import { ballymoreAdapter } from "./ballymore";
+import { lqHomesAdapter } from "./lqHomes";
+import { bellwayLondonAdapter } from "./bellwayLondon";
+import { berkeleyAdapter } from "./berkeley";
+import { fairviewNewHomesAdapter } from "./fairviewNewHomes";
+import { peabodyNewHomesAdapter } from "./peabodyNewHomes";
 import { createAutoAdapter } from "./autoAdapter";
 import { ALLOWED_DEVELOPERS, ALLOWED_DEVELOPER_NAMES } from "../developers";
 
@@ -9,6 +15,12 @@ import { ALLOWED_DEVELOPERS, ALLOWED_DEVELOPER_NAMES } from "../developers";
 const REAL_ADAPTERS: Record<string, SourceAdapter> = {
   [barrattLondonAdapter.id]: barrattLondonAdapter,
   [taylorWimpeyLondonAdapter.id]: taylorWimpeyLondonAdapter,
+  [ballymoreAdapter.id]: ballymoreAdapter,
+  [lqHomesAdapter.id]: lqHomesAdapter,
+  [bellwayLondonAdapter.id]: bellwayLondonAdapter,
+  [berkeleyAdapter.id]: berkeleyAdapter,
+  [fairviewNewHomesAdapter.id]: fairviewNewHomesAdapter,
+  [peabodyNewHomesAdapter.id]: peabodyNewHomesAdapter,
 };
 
 // One adapter per developer in london-developers.json — the file is

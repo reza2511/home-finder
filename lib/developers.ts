@@ -64,3 +64,36 @@ export const ALLOWED_DEVELOPERS: DeveloperEntry[] = file.developers;
 export const ALLOWED_DEVELOPER_IDS = new Set(ALLOWED_DEVELOPERS.map((d) => d.id));
 export const ALLOWED_DEVELOPER_NAMES = new Map(ALLOWED_DEVELOPERS.map((d) => [d.id, d.name]));
 export const ALLOWED_DEVELOPERS_BY_ID = new Map(ALLOWED_DEVELOPERS.map((d) => [d.id, d]));
+
+/**
+ * Persists a corrected `listings_url` for one developer directly into
+ * london-developers.json on disk, so future syncs use it without needing
+ * URL discovery to re-run (see lib/adapters/autoAdapter.ts). Edits the raw
+ * file text with a targeted regex rather than re-serialising the whole
+ * parsed object, so every other entry's exact formatting is left untouched
+ * (each developer is currently one line — a full JSON.stringify re-indent
+ * would otherwise turn this into a huge, unrelated diff).
+ *
+ * Returns false (and leaves the file untouched) if the developer's line
+ * can't be found, or if the edit wouldn't parse as valid JSON — this is a
+ * best-effort convenience, not something that should ever risk corrupting
+ * the canonical developer list.
+ */
+export function updateListingsUrlInFile(developerId: string, newListingsUrl: string): boolean {
+  const currentRaw = fs.readFileSync(filePath, "utf-8");
+  const escapedId = developerId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`("id":\\s*"${escapedId}"[^}]*?"listings_url":\\s*")[^"]*(")`);
+
+  if (!pattern.test(currentRaw)) return false;
+
+  const updated = currentRaw.replace(pattern, (_match, prefix: string, suffix: string) => `${prefix}${newListingsUrl}${suffix}`);
+
+  try {
+    JSON.parse(updated); // sanity check before touching disk — never write invalid JSON
+  } catch {
+    return false;
+  }
+
+  fs.writeFileSync(filePath, updated, "utf-8");
+  return true;
+}

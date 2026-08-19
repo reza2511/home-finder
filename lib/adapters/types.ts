@@ -53,7 +53,7 @@ export class AdapterAutoExtractionError extends Error {
   }
 }
 
-export type TenureValue = "share_of_freehold" | "leasehold" | "freehold";
+export type TenureValue = "share_of_freehold" | "leasehold" | "freehold" | "shared_ownership";
 export type BedroomTypeValue = "single" | "double" | null;
 
 export interface AdapterListing {
@@ -62,6 +62,10 @@ export interface AdapterListing {
   price: string;
   /** Numeric GBP value backing the price-range filter. */
   priceValue: number;
+  /** Full published price range (e.g. "£430,000 - £900,000"), when the
+   * source actually states an upper bound — not just a "from" floor.
+   * Absent/null when only a single starting price is published. */
+  priceRange?: string | null;
   url: string;
   /** Gallery photo URLs, in display order. Empty when the source has none. */
   images: string[];

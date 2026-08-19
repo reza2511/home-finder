@@ -22,15 +22,20 @@
  *    what this one page publishes, not a parsing bug — noted here rather
  *    than papered over.
  *
- * Not published anywhere in the fetched HTML (checked directly): postcodes
- * (only a full street address, e.g. "12 Mount Pleasant, London" — used as
- * `area`) and tenure (a "shared ownership" price-card variant exists, but
- * that's a different sales scheme, not the same concept as our
- * freehold/leasehold/share-of-freehold `tenure` field, so it is not mapped
- * onto it). Both are left absent rather than guessed.
+ * Postcodes are not published anywhere in the fetched HTML (checked
+ * directly) — only a full street address, e.g. "12 Mount Pleasant, London",
+ * used as `area`; left absent rather than guessed.
+ *
+ * Tenure: a `plot-card-price--sharedownership` card variant exists
+ * (confirmed live), with the share price as the card's own displayed price
+ * (e.g. "£96,250" for a "25% shared ownership of £385,000" plot) and an
+ * explicit "shared ownership" text alongside it — `detectTenure()` on the
+ * whole matched card picks this up as `shared_ownership`, distinct from
+ * `leasehold`/`freehold`/`share_of_freehold`.
  */
-import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
+import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter, TenureValue } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
+import { detectTenure } from "./tenureDetection";
 
 const BASE_URL = "https://www.taylorwimpey.co.uk";
 const LISTINGS_URL = `${BASE_URL}/new-homes/london`;
@@ -80,6 +85,7 @@ interface ParsedPlot {
   image: string;
   bedrooms: number;
   price: number;
+  tenure: TenureValue | null;
 }
 
 function parseBedrooms(raw: string): number | null {
@@ -108,6 +114,9 @@ function parsePlotsForDevelopment(chunk: string): ParsedPlot[] {
       image: absoluteUrl(dataSrc),
       bedrooms,
       price,
+      // Full matched card text — the "plot-card-price--sharedownership"
+      // class and its "X% shared ownership of £Y" text both sit inside it.
+      tenure: detectTenure(match[0]),
     });
   }
   return plots;
@@ -172,7 +181,7 @@ export const taylorWimpeyLondonAdapter: SourceAdapter = {
           mainImage: plot.image || null,
           bedrooms: plot.bedrooms,
           bedroomType: null, // not published per room
-          tenure: null, // not published anywhere on taylorwimpey.co.uk
+          tenure: plot.tenure,
           isNewBuild: true,
           postcode: "", // not published on this page — never guessed
           area,

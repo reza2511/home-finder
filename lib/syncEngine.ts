@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { pruneUnknownSources, requireSupabaseAdmin } from "./db";
 import { adapters } from "./adapters";
 import {
   AdapterAutoExtractionError,
@@ -7,6 +7,7 @@ import {
   SourceAdapter,
 } from "./adapters/types";
 import { isBotBlockSignal } from "./adapters/blockDetection";
+import { applySharedOwnershipOverride } from "./adapters/tenureDetection";
 import { upsertListingsForSource } from "./listingsStore";
 import type { StoredSourceStatus } from "./types";
 
@@ -17,32 +18,37 @@ import type { StoredSourceStatus } from "./types";
 // up to ~40 sources at once). A single Playwright render can itself take up
 // to ~90s (60s goto + 30s price-selector wait), retries once on timeout
 // (up to ~180s), and a page with no listings always burns the full 30s
-// price-wait before giving up — plus AI extraction (up to 45s) and queueing
-// — so a single request's timeout is nowhere near enough headroom.
-const ADAPTER_TIMEOUT_MS = 450_000;
+// price-wait before giving up — plus AI extraction (up to 45s) and queueing.
+// A source currently in `error` status also runs URL discovery first (two
+// plain fetches, then up to 3 candidate URLs each through this same
+// fetch/Playwright/AI pipeline) before falling back to the original
+// listings_url — see createAutoAdapter in adapters/autoAdapter.ts — so its
+// worst case is several times a single attempt's, not just one.
+const ADAPTER_TIMEOUT_MS = 900_000;
 
-const upsertStatusStmt = db.prepare(`
-  INSERT INTO sync_status
-    (sourceId, sourceName, lastRunAt, lastSuccessAt, status, httpStatus, listingsFound, added, updated, removed, durationMs, errorMessage, extractionMethod)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(sourceId) DO UPDATE SET
-    sourceName       = excluded.sourceName,
-    lastRunAt        = excluded.lastRunAt,
-    lastSuccessAt    = excluded.lastSuccessAt,
-    status           = excluded.status,
-    httpStatus       = excluded.httpStatus,
-    listingsFound    = excluded.listingsFound,
-    added            = excluded.added,
-    updated          = excluded.updated,
-    removed          = excluded.removed,
-    durationMs       = excluded.durationMs,
-    errorMessage     = excluded.errorMessage,
-    extractionMethod = excluded.extractionMethod
-`);
+interface SyncStatusUpsertRow {
+  source_id: string;
+  source_name: string;
+  last_run_at: string;
+  last_success_at: string | null;
+  status: StoredSourceStatus;
+  http_status: number | null;
+  listings_found: number;
+  added: number;
+  updated: number;
+  removed: number;
+  duration_ms: number;
+  error_message: string | null;
+  extraction_method: string | null;
+}
 
-const getPrevSuccessStmt = db.prepare(
-  `SELECT lastSuccessAt FROM sync_status WHERE sourceId = ?`
-);
+async function upsertSyncStatus(row: SyncStatusUpsertRow): Promise<void> {
+  const admin = requireSupabaseAdmin();
+  const { error } = await admin.from("sync_status").upsert(row, { onConflict: "source_id" });
+  if (error) {
+    throw new Error(`upsertSyncStatus(${row.source_id}): write failed: ${error.message}`);
+  }
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -91,11 +97,21 @@ function classifyFailure(err: unknown): {
   return { status: "error", httpStatus: null, message: String(err) };
 }
 
-function previousLastSuccessAt(sourceId: string): string | null {
-  const row = getPrevSuccessStmt.get(sourceId) as unknown as
-    | { lastSuccessAt: string | null }
-    | undefined;
-  return row?.lastSuccessAt ?? null;
+async function previousLastSuccessAt(sourceId: string): Promise<string | null> {
+  const admin = requireSupabaseAdmin();
+  const { data, error } = await admin
+    .from("sync_status")
+    .select("last_success_at")
+    .eq("source_id", sourceId)
+    .maybeSingle<{ last_success_at: string | null }>();
+  if (error) {
+    // Best-effort lookup for an already-failing run's own status write —
+    // never let a read hiccup here mask the real adapter failure being
+    // recorded below.
+    console.warn(`[syncEngine] previousLastSuccessAt(${sourceId}): read failed: ${error.message}`);
+    return null;
+  }
+  return data?.last_success_at ?? null;
 }
 
 async function runOne(adapter: SourceAdapter): Promise<void> {
@@ -106,48 +122,55 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
     const result = await withTimeout(adapter.run(), ADAPTER_TIMEOUT_MS);
     const durationMs = Date.now() - startedAt;
 
-    const diff = upsertListingsForSource(adapter.id, result.listings);
+    // Post-adapter normalization: applied to every source's listings here,
+    // in one place, rather than trusting each adapter's own tenure logic
+    // individually — see applySharedOwnershipOverride's own doc comment.
+    const normalizedListings = result.listings.map((listing) =>
+      applySharedOwnershipOverride(listing, adapter.id)
+    );
+
+    const diff = await upsertListingsForSource(adapter.id, normalizedListings);
     const status: StoredSourceStatus =
-      result.listings.length === 0 ? "no_results" : "ok";
+      normalizedListings.length === 0 ? "no_results" : "ok";
 
     // A run that completed without throwing counts as a "successful run" for
     // staleness purposes, whether or not it found any listings — that's
     // exactly what distinguishes `no_results` (ran fine, found nothing) from
     // `stale` (hasn't run/succeeded at all in a while).
-    upsertStatusStmt.run(
-      adapter.id,
-      adapter.name,
-      lastRunAt,
-      lastRunAt,
+    await upsertSyncStatus({
+      source_id: adapter.id,
+      source_name: adapter.name,
+      last_run_at: lastRunAt,
+      last_success_at: lastRunAt,
       status,
-      result.httpStatus ?? 200,
-      result.listings.length,
-      diff.added,
-      diff.updated,
-      diff.removed,
-      durationMs,
-      null,
-      result.extractionMethod ?? null
-    );
+      http_status: result.httpStatus ?? 200,
+      listings_found: normalizedListings.length,
+      added: diff.added,
+      updated: diff.updated,
+      removed: diff.removed,
+      duration_ms: durationMs,
+      error_message: null,
+      extraction_method: result.extractionMethod ?? null,
+    });
   } catch (err) {
     const durationMs = Date.now() - startedAt;
     const { status, httpStatus, message } = classifyFailure(err);
 
-    upsertStatusStmt.run(
-      adapter.id,
-      adapter.name,
-      lastRunAt,
-      previousLastSuccessAt(adapter.id),
+    await upsertSyncStatus({
+      source_id: adapter.id,
+      source_name: adapter.name,
+      last_run_at: lastRunAt,
+      last_success_at: await previousLastSuccessAt(adapter.id),
       status,
-      httpStatus,
-      0,
-      0,
-      0,
-      0,
-      durationMs,
-      message,
-      null
-    );
+      http_status: httpStatus,
+      listings_found: 0,
+      added: 0,
+      updated: 0,
+      removed: 0,
+      duration_ms: durationMs,
+      error_message: message,
+      extraction_method: null,
+    });
   }
 }
 
@@ -156,6 +179,7 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
  * avoids re-queuing everything behind a shared render-concurrency limit when
  * only a few sources need a retry. */
 export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
+  await pruneUnknownSources();
   const targets = sourceIds ? adapters.filter((a) => sourceIds.includes(a.id)) : adapters;
   await Promise.all(targets.map((adapter) => runOne(adapter)));
 }

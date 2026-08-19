@@ -20,11 +20,16 @@ first load.
 
 - **Next.js 14 (App Router) + TypeScript**, plain CSS (`app/globals.css`) — no
   extra UI framework, to keep styling simple and consistent.
-- **Storage**: `node:sqlite` (Node's built-in SQLite, no native build step) —
-  see `lib/db.ts`. The database file lives at `data/homefinder.sqlite`
-  (git-ignored). On every startup it also prunes any rows whose `sourceId`
-  isn't in the current adapter registry, so removed/renamed sources don't
-  leave stale rows behind.
+- **Storage**: Supabase Postgres — see `lib/db.ts` and
+  `supabase/migrations/*.sql`. Reads (`GET /api/listings`, `GET
+  /api/status`) go through the `anon` key, subject to RLS's public-SELECT-only
+  policies; writes (the sync job) go through the `service_role` key
+  (`SUPABASE_SERVICE_ROLE_KEY`, server-only, never `NEXT_PUBLIC_*`), which
+  bypasses RLS — `listings`/`sync_status` have no anon/authenticated
+  insert/update policy at all. Credentials live in `.env.local`
+  (git-ignored, never committed). Every sync also prunes any rows whose
+  `source_id` isn't in the current adapter registry, so removed/renamed
+  sources don't leave stale rows behind.
 - **Source adapter** (`lib/adapters/barrattLondon.ts`): real data only, no
   mocks. It calls two public, unauthenticated barratthomes.co.uk endpoints
   (checked against robots.txt first):

@@ -13,6 +13,13 @@ export interface ListingFilters {
   newBuildOnly: boolean;
   /** Matched against postcode and area, case-insensitively. */
   search: string;
+  /** Selected developer (source) ids to show, checkbox-list semantics:
+   *  `null` = default/"all ticked" (no restriction — works even before the
+   *  developer list has loaded). An array restricts to exactly those ids,
+   *  including `[]` for "Clear all" (every developer unticked → nothing
+   *  shown). Unlike `tenure`, empty can't mean "no restriction" here since
+   *  the UI needs a real "select none" state distinct from the default. */
+  developers: string[] | null;
 }
 
 export const DEFAULT_FILTERS: ListingFilters = {
@@ -23,6 +30,7 @@ export const DEFAULT_FILTERS: ListingFilters = {
   tenure: [],
   newBuildOnly: false,
   search: "",
+  developers: null,
 };
 
 export function filterListings(listings: Listing[], filters: ListingFilters): Listing[] {
@@ -54,6 +62,10 @@ export function filterListings(listings: Listing[], filters: ListingFilters): Li
 
     if (filters.newBuildOnly && !listing.isNewBuild) return false;
 
+    if (filters.developers !== null && !filters.developers.includes(listing.sourceId)) {
+      return false;
+    }
+
     if (search) {
       const haystack = `${listing.postcode} ${listing.area}`.toLowerCase();
       if (!haystack.includes(search)) return false;
@@ -71,6 +83,7 @@ export function isDefaultFilters(filters: ListingFilters): boolean {
     filters.maxPrice == null &&
     filters.tenure.length === 0 &&
     !filters.newBuildOnly &&
-    filters.search.trim() === ""
+    filters.search.trim() === "" &&
+    filters.developers === null
   );
 }

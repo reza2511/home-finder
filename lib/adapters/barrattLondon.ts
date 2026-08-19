@@ -210,7 +210,14 @@ export const barrattLondonAdapter: SourceAdapter = {
           mainImage: images[0] ?? null,
           bedrooms: plot.bedrooms,
           bedroomType: null, // Barratt doesn't publish single/double per room
-          tenure: null, // not published anywhere on barratthomes.co.uk
+          // Checked for shared ownership specifically (re-verified live):
+          // several development pages have a "Home Reach" (Barratt's
+          // shared-ownership scheme) jump-link in their nav, but that
+          // section's actual plot content is injected client-side and isn't
+          // present in the static HTML this adapter fetches (no Playwright
+          // here — see file header) — no per-plot signal to key off, so
+          // never guessed. Left null, same as every other tenure signal.
+          tenure: null,
           isNewBuild: true,
           postcode,
           area: dev.town ?? "",

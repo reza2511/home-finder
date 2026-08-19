@@ -44,7 +44,7 @@ export interface StatusResponse {
   summary: StatusSummary;
 }
 
-export type TenureValue = "share_of_freehold" | "leasehold" | "freehold";
+export type TenureValue = "share_of_freehold" | "leasehold" | "freehold" | "shared_ownership";
 export type BedroomTypeValue = "single" | "double" | null;
 
 export interface Listing {
@@ -54,6 +54,10 @@ export interface Listing {
   title: string;
   price: string;
   priceValue: number;
+  /** Full published price range (e.g. "£680,000 - £2,275,000"), when the
+   * source actually states an upper bound — not just a "from" floor.
+   * Absent/null when only a single starting price is published. */
+  priceRange?: string | null;
   url: string;
   images: string[];
   mainImage: string | null;

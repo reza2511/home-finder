@@ -192,6 +192,37 @@ button {
   text-align: center;
 }
 
+/* ---------- Page layout (sidebar + main) ---------- */
+
+.page-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.page-sidebar {
+  flex: 0 0 260px;
+  width: 260px;
+  position: sticky;
+  top: 84px; /* clears the sticky header */
+}
+
+.page-main {
+  flex: 1 1 auto;
+  min-width: 0; /* let the grid/filter row shrink instead of overflowing the flex item */
+}
+
+@media (max-width: 860px) {
+  .page-layout {
+    flex-direction: column;
+  }
+
+  .page-sidebar {
+    width: 100%;
+    position: static;
+  }
+}
+
 /* ---------- Filter panel ---------- */
 
 .filter-panel {
@@ -376,6 +407,117 @@ button {
 
 .filter-clear {
   margin-left: auto;
+}
+
+/* ---------- Developer filter (sidebar) ---------- */
+
+.dev-filter {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dev-filter__heading {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.dev-filter__search {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  width: 100%;
+}
+
+.dev-filter__search:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.dev-filter__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dev-filter__link {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dev-filter__link:hover {
+  text-decoration: underline;
+}
+
+.dev-filter__link-sep {
+  color: var(--color-border);
+  font-size: 12px;
+}
+
+.dev-filter__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+}
+
+.dev-filter__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.dev-filter__item:hover {
+  background: var(--color-bg);
+}
+
+.dev-filter__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-filter__count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.dev-filter__empty {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+  padding: 4px 2px;
 }
 
 /* ---------- Listing grid & cards ---------- */

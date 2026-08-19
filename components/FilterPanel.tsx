@@ -26,8 +26,9 @@ const BEDROOM_TYPE_OPTIONS: { value: BedroomTypeFilterValue; label: string }[] =
 
 const TENURE_OPTIONS: { value: TenureValue; label: string }[] = [
   { value: "share_of_freehold", label: "Share of freehold" },
-  { value: "leasehold", label: "Leasehold" },
   { value: "freehold", label: "Freehold" },
+  { value: "leasehold", label: "Leasehold" },
+  { value: "shared_ownership", label: "Shared ownership" },
 ];
 
 interface Props {

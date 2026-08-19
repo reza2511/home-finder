@@ -28,6 +28,8 @@
  */
 import * as cheerio from "cheerio";
 import type { DeveloperEntry } from "../developers";
+import { updateListingsUrlInFile } from "../developers";
+import { supabase } from "../db";
 import {
   AdapterAutoExtractionError,
   AdapterHttpError,
@@ -37,6 +39,9 @@ import {
   TenureValue,
 } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
+import { discoverCandidateUrls } from "./urlDiscovery";
+import { postcodeAreaIsLondon } from "./londonPostcodes";
+import { detectTenure, isExclusivelySharedOwnershipProvider } from "./tenureDetection";
 
 const FETCH_TIMEOUT_MS = 15_000;
 // domcontentloaded rather than load/networkidle: many sites never go fully
@@ -97,15 +102,6 @@ function parsePriceNumber(text: string): number | null {
   if (!match) return null;
   const n = parseFloat(match[0]);
   return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function normalizeTenureText(raw: string | null | undefined): TenureValue | null {
-  if (!raw) return null;
-  const t = raw.toLowerCase();
-  if (t.includes("share of freehold") || t.includes("share-of-freehold")) return "share_of_freehold";
-  if (t.includes("leasehold")) return "leasehold";
-  if (t.includes("freehold")) return "freehold";
-  return null;
 }
 
 function firstString(value: unknown): string | null {
@@ -266,7 +262,9 @@ async function renderWithPlaywright(url: string): Promise<{ html: string; priceS
 
 // ---------- common intermediate shape ----------
 
-interface RawExtractedItem {
+// Exported so lqHomes.ts (a dedicated adapter, not the generic pipeline) can
+// reuse the same AI-extraction fallback rather than duplicating it.
+export interface RawExtractedItem {
   name: string | null;
   url: string | null;
   priceValue: number | null;
@@ -281,6 +279,15 @@ function finalizeListings(raw: RawExtractedItem[], developer: DeveloperEntry): A
   const listings: AdapterListing[] = [];
   const seenIds = new Set<string>();
   let index = 0;
+
+  // Some developers in london-developers.json publish shared ownership as
+  // their *only* tenure/scheme (Guinness Homes, MTVH, SO Resi, SNG, Hyde New
+  // Homes, Sage Homes) — every listing from those really is shared
+  // ownership even on a page that never uses the words itself, so it's
+  // forced here rather than left to per-listing text detection. Developers
+  // offering it alongside other schemes are NOT included in this check —
+  // see isExclusivelySharedOwnershipProvider's own doc comment.
+  const forceSharedOwnership = isExclusivelySharedOwnershipProvider(developer.tenures);
 
   for (const item of raw) {
     index++;
@@ -311,7 +318,7 @@ function finalizeListings(raw: RawExtractedItem[], developer: DeveloperEntry): A
       mainImage: item.image,
       bedrooms: item.bedrooms,
       bedroomType: null, // not attempted generically — too source-specific to infer reliably
-      tenure: item.tenure,
+      tenure: forceSharedOwnership ? "shared_ownership" : item.tenure,
       isNewBuild: true,
       postcode: item.postcode ?? "",
       area: "",
@@ -493,7 +500,7 @@ function mapEmbeddedJsonObject(obj: Record<string, unknown>, baseUrl: string): R
   const postcode = firstString(pickKey(obj, POSTCODE_KEYS));
   const imageRaw = firstString(pickKey(obj, IMAGE_KEYS));
   const image = imageRaw ? absoluteUrl(imageRaw, baseUrl) : null;
-  const tenure = normalizeTenureText(firstString(pickKey(obj, TENURE_KEYS)));
+  const tenure = detectTenure(firstString(pickKey(obj, TENURE_KEYS)));
 
   if (!name || !url || priceValue == null) return null;
 
@@ -606,7 +613,6 @@ function extractHtmlHeuristic(html: string, baseUrl: string): RawExtractedItem[]
     const bedrooms = isStudio ? 0 : bedroomMatch ? parseInt(bedroomMatch[1], 10) : null;
 
     const postcodeMatch = text.match(/[A-Z]{1,2}[0-9][A-Z0-9]?\s[0-9][A-Z]{2}/i);
-    const tenureMatch = text.match(/share of freehold|leasehold|freehold/i);
 
     const linkHref = $card.is("a") ? $card.attr("href") : $card.find("a[href]").first().attr("href");
     const url = linkHref ? absoluteUrl(linkHref, baseUrl) : null;
@@ -628,7 +634,11 @@ function extractHtmlHeuristic(html: string, baseUrl: string): RawExtractedItem[]
       bedrooms,
       postcode: postcodeMatch ? postcodeMatch[0].toUpperCase() : null,
       image,
-      tenure: normalizeTenureText(tenureMatch?.[0] ?? null),
+      // Full card text, not a narrow pre-matched substring — a "25% share"
+      // or "Shared Ownership" mention can sit anywhere in the card, and
+      // must win over a "leasehold" mention elsewhere in the same card
+      // (see detectTenure's doc comment).
+      tenure: detectTenure(text),
     });
   }
   return items;
@@ -729,7 +739,7 @@ function validateAndNormalizeAiListings(
       bedrooms,
       postcode: firstString(entry.postcode),
       image: imageUrlRaw ? absoluteUrl(imageUrlRaw, baseUrl) : null,
-      tenure: normalizeTenureText(firstString(entry.tenure)),
+      tenure: detectTenure(firstString(entry.tenure)),
     });
   }
 
@@ -776,7 +786,7 @@ function validateAndNormalizeAiListings(
  * Returns [] (never throws for "the model found nothing" or "no API key
  * configured") so callers can fall through to the normal no_pattern_found
  * path; genuine API/network failures do throw, and are logged by the caller. */
-async function extractWithAi(
+export async function extractWithAi(
   html: string,
   baseUrl: string,
   attempted: string[]
@@ -874,178 +884,293 @@ function tryStrategies(
   return null;
 }
 
+/** The full fetch → (maybe Playwright) → strategy pipeline, against a given
+ * URL — not necessarily `developer.listings_url`. Factored out so it can be
+ * run both against the developer's recorded listings_url (the normal case)
+ * and, for developers currently in `error` status, against candidate URLs
+ * found by discoverCandidateUrls() below (see createAutoAdapter). */
+async function attemptExtraction(targetUrl: string, developer: DeveloperEntry): Promise<AdapterRunResult> {
+  const attempted: string[] = [];
+  let baseUrl: string;
+  try {
+    baseUrl = new URL(targetUrl).origin;
+  } catch {
+    throw new AdapterAutoExtractionError("parse_error", `"${targetUrl}" is not a valid URL.`, []);
+  }
+
+  // Step 1: plain fetch. A full browser is heavier, so this stays the
+  // fast path — only escalated to Playwright when it doesn't work out.
+  let fetchResult: FetchResult | null = null;
+  let fetchError: unknown = null;
+  try {
+    fetchResult = await fetchText(targetUrl);
+    attempted.push("fetch");
+  } catch (err) {
+    fetchError = err;
+    attempted.push("fetch:failed");
+  }
+
+  let html: string | null = null;
+  let renderedViaPlaywright = false;
+
+  if (fetchResult) {
+    if (isBotBlockSignal(fetchResult.status, fetchResult.text)) {
+      // Retry once through a real browser after a short randomised
+      // delay, per the "blocked" retry policy — no CAPTCHA-solving, no
+      // proxies, just a normal second look with a real render.
+      attempted.push("blocked-on-fetch");
+      await delay(randomDelayMs(1500, 4000));
+      let retryHtml: string;
+      try {
+        const rendered = await renderWithPlaywright(targetUrl);
+        retryHtml = rendered.html;
+        attempted.push(rendered.priceSelectorMatched ? "playwright-retry" : "playwright-retry:no-price-selector");
+      } catch (err) {
+        throw new AdapterHttpError(
+          `${developer.name}: blocked on first request; browser retry also failed to load ` +
+            `(${err instanceof Error ? err.message : String(err)}) — needs manual review`,
+          fetchResult.status,
+          fetchResult.text.slice(0, 3000)
+        );
+      }
+      if (isBotBlockSignal(200, retryHtml)) {
+        throw new AdapterHttpError(
+          `${developer.name}: still shows a bot-block/challenge page after a browser retry — needs manual review`,
+          200,
+          retryHtml.slice(0, 3000)
+        );
+      }
+      html = retryHtml;
+      renderedViaPlaywright = true;
+    } else if (fetchResult.status < 200 || fetchResult.status >= 300) {
+      throw new AdapterHttpError(
+        `${developer.name}: unexpected HTTP ${fetchResult.status}`,
+        fetchResult.status,
+        fetchResult.text.slice(0, 3000)
+      );
+    } else {
+      html = fetchResult.text;
+    }
+  }
+
+  // Step 2: if we have un-rendered static HTML, try it as-is first
+  // (unless it's an obvious JS-app shell), then fall back to a real
+  // Playwright render — covering both "looked empty" and "had plenty of
+  // static HTML but the listings themselves are injected client-side".
+  if (html !== null && !renderedViaPlaywright) {
+    if (!looksJsRendered(html)) {
+      const result = tryStrategies(html, baseUrl, developer, attempted);
+      if (result) {
+        return { httpStatus: fetchResult!.status, listings: result.listings, extractionMethod: result.method };
+      }
+    } else {
+      attempted.push("js-detected");
+    }
+
+    try {
+      const rendered = await renderWithPlaywright(targetUrl);
+      html = rendered.html;
+      renderedViaPlaywright = true;
+      attempted.push(rendered.priceSelectorMatched ? "playwright-render" : "playwright-render:no-price-selector");
+    } catch (err) {
+      throw new AdapterAutoExtractionError(
+        "js_required",
+        `Static extraction found nothing and a Playwright render failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        attempted
+      );
+    }
+    if (isBotBlockSignal(200, html)) {
+      throw new AdapterHttpError(
+        `${developer.name}: rendered page looked like a bot-block/challenge page`,
+        200,
+        html.slice(0, 3000)
+      );
+    }
+  }
+
+  // Step 3: plain fetch failed outright (network/DNS/etc.) — try a real
+  // browser as a last resort before giving up.
+  if (html === null) {
+    try {
+      const rendered = await renderWithPlaywright(targetUrl);
+      html = rendered.html;
+      renderedViaPlaywright = true;
+      attempted.push(rendered.priceSelectorMatched ? "playwright-fallback" : "playwright-fallback:no-price-selector");
+    } catch (renderErr) {
+      throw new AdapterAutoExtractionError(
+        "parse_error",
+        `Network error on plain fetch (${fetchError instanceof Error ? fetchError.message : String(fetchError)}); ` +
+          `browser fallback also failed (${renderErr instanceof Error ? renderErr.message : String(renderErr)}).`,
+        attempted
+      );
+    }
+    if (isBotBlockSignal(200, html)) {
+      throw new AdapterHttpError(
+        `${developer.name}: rendered page looked like a bot-block/challenge page`,
+        200,
+        html.slice(0, 3000)
+      );
+    }
+  }
+
+  // Step 4: extract from whatever HTML we ended up with (rendered, via
+  // any of the paths above).
+  const result = tryStrategies(html, baseUrl, developer, attempted);
+  if (result) {
+    return {
+      httpStatus: fetchResult?.status ?? 200,
+      listings: result.listings,
+      extractionMethod: renderedViaPlaywright ? `${result.method} (playwright)` : result.method,
+    };
+  }
+
+  // Step 5: last resort — ask the model to read the rendered page
+  // itself. Only attempted on a genuinely rendered page (never on raw
+  // static HTML). A miss (no key configured, model found nothing, or
+  // its output didn't survive the grounding/fabrication checks) just
+  // falls through to the normal no_pattern_found error below like any
+  // other failed strategy — an AI-side failure never substitutes fake
+  // data or its own bespoke error reason.
+  if (renderedViaPlaywright) {
+    try {
+      const aiRaw = await extractWithAi(html, baseUrl, attempted);
+      if (aiRaw.length > 0) {
+        const listings = finalizeListings(aiRaw, developer);
+        if (listings.length > 0) {
+          attempted.push("ai_extraction");
+          return { httpStatus: fetchResult?.status ?? 200, listings, extractionMethod: "ai_extraction" };
+        }
+      }
+      attempted.push("ai_extraction:no_listings");
+    } catch (err) {
+      attempted.push(`ai_extraction:failed (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+
+  throw new AdapterAutoExtractionError(
+    "no_pattern_found",
+    `No JSON-LD, embedded JSON, repeated £-price card pattern, or AI extraction found real listings ` +
+      `on ${targetUrl}` +
+      `${renderedViaPlaywright ? " (checked both static and Playwright-rendered HTML)" : ""}.`,
+    attempted
+  );
+}
+
+// ---------- UK/London filter (discovered-URL path only) ----------
+
+const OVERSEAS_SIGNAL_RE =
+  /\bireland\b|\bdublin\b|\bcork\b|\bgalway\b|\bwestmeath\b|\bkildare\b|\bfrance\b|\bspain\b|\bportugal\b|\bdubai\b|\buae\b|\bu\.?s\.?a\.?\b|\bunited states\b|\bnew york\b|\bgermany\b|\bnetherlands\b/i;
+
+/**
+ * Generic auto-extraction has no dedicated location/area field (see
+ * finalizeListings — `area` is always ""), so this only has `title`, `url`,
+ * and `postcode` to go on. Requires a *positive* London signal rather than
+ * just the absence of an overseas one — confirmed necessary live: Bellway's
+ * discovered candidate was https://www.bellway.co.uk/new-homes/eastern-
+ * counties/hatton-gate, a real UK page with real UK postcodes, but Eastern
+ * Counties, not London — "not overseas" alone would have wrongly let it
+ * through. Only applied to the discovered-URL path — the existing
+ * developer.listings_url path is unchanged.
+ */
+function isLikelyLondonListing(listing: AdapterListing): boolean {
+  const haystack = `${listing.title} ${listing.url}`;
+  if (OVERSEAS_SIGNAL_RE.test(`${haystack} ${listing.postcode}`)) return false;
+
+  const postcode = listing.postcode.trim();
+  if (postcode) {
+    return postcodeAreaIsLondon(postcode);
+  }
+
+  // No postcode captured — only fall back to an explicit "London" mention
+  // in the title/url; no postcode AND no "London" mention is not enough
+  // evidence to include, given the Eastern Counties case above.
+  return /\blondon\b/i.test(haystack);
+}
+
+// ---------- URL discovery orchestration (error-status developers only) ----------
+
+async function getStoredStatus(developerId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("sync_status")
+    .select("status")
+    .eq("source_id", developerId)
+    .maybeSingle<{ status: string }>();
+  if (error) {
+    // Best-effort read used only to decide whether to run URL discovery —
+    // a read hiccup here should fall back to the normal (non-discovery)
+    // path, not fail the whole adapter run.
+    console.warn(`[autoAdapter] getStoredStatus(${developerId}): read failed: ${error.message}`);
+    return null;
+  }
+  return data?.status ?? null;
+}
+
 export function createAutoAdapter(developer: DeveloperEntry): SourceAdapter {
   return {
     id: developer.id,
     name: developer.name,
 
     async run(): Promise<AdapterRunResult> {
-      const attempted: string[] = [];
-      let baseUrl: string;
-      try {
-        baseUrl = new URL(developer.listings_url).origin;
-      } catch {
-        throw new AdapterAutoExtractionError("parse_error", `"${developer.listings_url}" is not a valid URL.`, []);
+      if ((await getStoredStatus(developer.id)) !== "error") {
+        return attemptExtraction(developer.listings_url, developer);
       }
 
-      // Step 1: plain fetch. A full browser is heavier, so this stays the
-      // fast path — only escalated to Playwright when it doesn't work out.
-      let fetchResult: FetchResult | null = null;
-      let fetchError: unknown = null;
+      // Currently in `error` — the recorded listings_url alone hasn't been
+      // yielding real listings (often because it's just the homepage, not
+      // a developments/search page). Try discovering a better URL from the
+      // site itself before falling back to the existing behaviour.
+      const discoveryLog: string[] = [];
+      let candidates: string[] = [];
       try {
-        fetchResult = await fetchText(developer.listings_url);
-        attempted.push("fetch");
+        const discovery = await discoverCandidateUrls(developer);
+        candidates = discovery.candidates;
+        discoveryLog.push(...discovery.notes);
       } catch (err) {
-        fetchError = err;
-        attempted.push("fetch:failed");
+        discoveryLog.push(`discovery itself failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      let html: string | null = null;
-      let renderedViaPlaywright = false;
-
-      if (fetchResult) {
-        if (isBotBlockSignal(fetchResult.status, fetchResult.text)) {
-          // Retry once through a real browser after a short randomised
-          // delay, per the "blocked" retry policy — no CAPTCHA-solving, no
-          // proxies, just a normal second look with a real render.
-          attempted.push("blocked-on-fetch");
-          await delay(randomDelayMs(1500, 4000));
-          let retryHtml: string;
-          try {
-            const rendered = await renderWithPlaywright(developer.listings_url);
-            retryHtml = rendered.html;
-            attempted.push(rendered.priceSelectorMatched ? "playwright-retry" : "playwright-retry:no-price-selector");
-          } catch (err) {
-            throw new AdapterHttpError(
-              `${developer.name}: blocked on first request; browser retry also failed to load ` +
-                `(${err instanceof Error ? err.message : String(err)}) — needs manual review`,
-              fetchResult.status,
-              fetchResult.text.slice(0, 3000)
+      for (const candidateUrl of candidates) {
+        try {
+          const result = await attemptExtraction(candidateUrl, developer);
+          const londonListings = result.listings.filter(isLikelyLondonListing);
+          if (londonListings.length === 0) {
+            discoveryLog.push(
+              `${candidateUrl}: extraction found ${result.listings.length} listing(s) but none looked UK/London`
             );
+            continue;
           }
-          if (isBotBlockSignal(200, retryHtml)) {
-            throw new AdapterHttpError(
-              `${developer.name}: still shows a bot-block/challenge page after a browser retry — needs manual review`,
-              200,
-              retryHtml.slice(0, 3000)
-            );
-          }
-          html = retryHtml;
-          renderedViaPlaywright = true;
-        } else if (fetchResult.status < 200 || fetchResult.status >= 300) {
-          throw new AdapterHttpError(
-            `${developer.name}: unexpected HTTP ${fetchResult.status}`,
-            fetchResult.status,
-            fetchResult.text.slice(0, 3000)
+
+          const saved = updateListingsUrlInFile(developer.id, candidateUrl);
+          console.warn(
+            `[auto-adapter] ${developer.name}: URL discovery found a working listings page at ${candidateUrl} ` +
+              `(${londonListings.length} UK/London listing(s))` +
+              (saved ? " — saved to london-developers.json" : " — could not update london-developers.json")
           );
-        } else {
-          html = fetchResult.text;
-        }
-      }
 
-      // Step 2: if we have un-rendered static HTML, try it as-is first
-      // (unless it's an obvious JS-app shell), then fall back to a real
-      // Playwright render — covering both "looked empty" and "had plenty of
-      // static HTML but the listings themselves are injected client-side".
-      if (html !== null && !renderedViaPlaywright) {
-        if (!looksJsRendered(html)) {
-          const result = tryStrategies(html, baseUrl, developer, attempted);
-          if (result) {
-            return { httpStatus: fetchResult!.status, listings: result.listings, extractionMethod: result.method };
-          }
-        } else {
-          attempted.push("js-detected");
-        }
-
-        try {
-          const rendered = await renderWithPlaywright(developer.listings_url);
-          html = rendered.html;
-          renderedViaPlaywright = true;
-          attempted.push(rendered.priceSelectorMatched ? "playwright-render" : "playwright-render:no-price-selector");
+          return {
+            ...result,
+            listings: londonListings,
+            extractionMethod: `${result.extractionMethod ?? "unknown"} (discovered)`,
+          };
         } catch (err) {
-          throw new AdapterAutoExtractionError(
-            "js_required",
-            `Static extraction found nothing and a Playwright render failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-            attempted
-          );
-        }
-        if (isBotBlockSignal(200, html)) {
-          throw new AdapterHttpError(
-            `${developer.name}: rendered page looked like a bot-block/challenge page`,
-            200,
-            html.slice(0, 3000)
-          );
+          discoveryLog.push(`${candidateUrl}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
-      // Step 3: plain fetch failed outright (network/DNS/etc.) — try a real
-      // browser as a last resort before giving up.
-      if (html === null) {
-        try {
-          const rendered = await renderWithPlaywright(developer.listings_url);
-          html = rendered.html;
-          renderedViaPlaywright = true;
-          attempted.push(rendered.priceSelectorMatched ? "playwright-fallback" : "playwright-fallback:no-price-selector");
-        } catch (renderErr) {
-          throw new AdapterAutoExtractionError(
-            "parse_error",
-            `Network error on plain fetch (${fetchError instanceof Error ? fetchError.message : String(fetchError)}); ` +
-              `browser fallback also failed (${renderErr instanceof Error ? renderErr.message : String(renderErr)}).`,
-            attempted
-          );
+      // No discovered candidate worked (or none were found) — fall back to
+      // the existing listings_url, same as before discovery existed. The
+      // discovery attempts are folded into the failure so the real reason —
+      // including every candidate URL tried — is fully logged either way.
+      try {
+        return await attemptExtraction(developer.listings_url, developer);
+      } catch (err) {
+        if (discoveryLog.length > 0 && err instanceof Error) {
+          err.message += ` | URL discovery also tried: ${discoveryLog.join("; ")}`;
         }
-        if (isBotBlockSignal(200, html)) {
-          throw new AdapterHttpError(
-            `${developer.name}: rendered page looked like a bot-block/challenge page`,
-            200,
-            html.slice(0, 3000)
-          );
-        }
+        throw err;
       }
-
-      // Step 4: extract from whatever HTML we ended up with (rendered, via
-      // any of the paths above).
-      const result = tryStrategies(html, baseUrl, developer, attempted);
-      if (result) {
-        return {
-          httpStatus: fetchResult?.status ?? 200,
-          listings: result.listings,
-          extractionMethod: renderedViaPlaywright ? `${result.method} (playwright)` : result.method,
-        };
-      }
-
-      // Step 5: last resort — ask the model to read the rendered page
-      // itself. Only attempted on a genuinely rendered page (never on raw
-      // static HTML). A miss (no key configured, model found nothing, or
-      // its output didn't survive the grounding/fabrication checks) just
-      // falls through to the normal no_pattern_found error below like any
-      // other failed strategy — an AI-side failure never substitutes fake
-      // data or its own bespoke error reason.
-      if (renderedViaPlaywright) {
-        try {
-          const aiRaw = await extractWithAi(html, baseUrl, attempted);
-          if (aiRaw.length > 0) {
-            const listings = finalizeListings(aiRaw, developer);
-            if (listings.length > 0) {
-              attempted.push("ai_extraction");
-              return { httpStatus: fetchResult?.status ?? 200, listings, extractionMethod: "ai_extraction" };
-            }
-          }
-          attempted.push("ai_extraction:no_listings");
-        } catch (err) {
-          attempted.push(`ai_extraction:failed (${err instanceof Error ? err.message : String(err)})`);
-        }
-      }
-
-      throw new AdapterAutoExtractionError(
-        "no_pattern_found",
-        `No JSON-LD, embedded JSON, repeated £-price card pattern, or AI extraction found real listings ` +
-          `on ${developer.listings_url}` +
-          `${renderedViaPlaywright ? " (checked both static and Playwright-rendered HTML)" : ""}.`,
-        attempted
-      );
     },
   };
 }
