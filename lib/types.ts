@@ -27,6 +27,11 @@ export interface SyncStatusRow {
   /** Which extraction strategy succeeded, e.g. "json-ld", "html-heuristic",
    * "custom-adapter" — null on failure or if the adapter didn't report one. */
   extractionMethod: string | null;
+  /** How many of this run's raw listings were dropped because a
+   * direct-developer source already covers them — always 0 for a direct
+   * developer source itself; only aggregators (1newhomes, Benhams) ever
+   * dedupe. See lib/adapters/dedupe.ts. */
+  dedupedCount: number;
 }
 
 export interface StatusSummary {
@@ -47,9 +52,16 @@ export interface StatusResponse {
 export type TenureValue = "share_of_freehold" | "leasehold" | "freehold" | "shared_ownership";
 export type BedroomTypeValue = "single" | "double" | null;
 
+/** "aggregator" for a listing from a real third-party listing site
+ * (1newhomes, Benhams); "developer" (the default) for a developer's own
+ * site. Surfaced so the UI can label aggregator-sourced listings if it
+ * ever wants to — dedup itself already happened before storage. */
+export type SourceType = "developer" | "aggregator";
+
 export interface Listing {
   sourceId: string;
   sourceName: string;
+  sourceType: SourceType;
   externalId: string;
   title: string;
   price: string;

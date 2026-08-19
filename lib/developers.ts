@@ -37,6 +37,10 @@ export interface DeveloperEntry {
   priority?: number;
   verify?: boolean;
   notes?: string;
+  /** "aggregator" for a real third-party listing site (1newhomes, Benhams —
+   * not the developer's own site); absent/undefined means a direct
+   * developer source. See lib/adapters/dedupe.ts for what this drives. */
+  source_type?: "aggregator";
 }
 
 interface DeveloperListFile {
@@ -64,6 +68,14 @@ export const ALLOWED_DEVELOPERS: DeveloperEntry[] = file.developers;
 export const ALLOWED_DEVELOPER_IDS = new Set(ALLOWED_DEVELOPERS.map((d) => d.id));
 export const ALLOWED_DEVELOPER_NAMES = new Map(ALLOWED_DEVELOPERS.map((d) => [d.id, d.name]));
 export const ALLOWED_DEVELOPERS_BY_ID = new Map(ALLOWED_DEVELOPERS.map((d) => [d.id, d]));
+
+/** True if this developer id's registry entry is tagged `source_type:
+ * "aggregator"` — a real third-party listing site, not a developer's own
+ * site. Used by lib/syncEngine.ts to decide whether a source's listings go
+ * through dedupe.ts before being stored. */
+export function isAggregatorSource(developerId: string): boolean {
+  return ALLOWED_DEVELOPERS_BY_ID.get(developerId)?.source_type === "aggregator";
+}
 
 /**
  * Persists a corrected `listings_url` for one developer directly into

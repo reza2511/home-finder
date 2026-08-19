@@ -60,9 +60,21 @@ first load.
     what was actually received) is stored and shown in the Status Monitor.
   - `stale` — not stored; derived at read time (`lib/statusDerive.ts`) when
     there's been no successful run in the last 26h (syncs run every 12h).
+- **Aggregator sources** (`source_type: "aggregator"` in
+  london-developers.json — currently 1newhomes and Benhams, real third-party
+  London new-homes listing sites, not developers' own sites): a
+  direct-developer source always wins. `lib/adapters/dedupe.ts` drops any
+  aggregator listing that matches a currently-active direct-developer
+  listing on name + postcode + price (allowing small differences — see that
+  file's own header for exactly how). `lib/syncEngine.ts` runs every
+  direct-developer adapter to completion first, then every aggregator
+  adapter — dedupe needs to see the complete, freshly-synced set of direct
+  listings, not a partial one from a race with a still-running direct
+  source. `sync_status.deduped_count` records how many were dropped per run.
 - **Browser-based adapters** (`lib/adapters/browser.ts`): every adapter that
   needs a real rendered page (autoAdapter, Ballymore, Berkeley, Fairview,
-  L&Q, Peabody) shares one lazily-launched Chromium instance via
+  L&Q, Peabody, Redrow, 1newhomes, Benhams) shares one lazily-launched
+  Chromium instance via
   `getSharedBrowser()` instead of each launching its own. Locally this
   resolves the Chromium `playwright` (a devDependency, only used to populate
   the local browser cache) downloaded; on Vercel (`process.env.VERCEL` is

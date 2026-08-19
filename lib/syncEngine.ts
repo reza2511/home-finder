@@ -1,5 +1,6 @@
 import { pruneUnknownSources, requireSupabaseAdmin } from "./db";
 import { adapters } from "./adapters";
+import { isAggregatorSource } from "./developers";
 import {
   AdapterAutoExtractionError,
   AdapterHttpError,
@@ -8,6 +9,7 @@ import {
 } from "./adapters/types";
 import { isBotBlockSignal } from "./adapters/blockDetection";
 import { applySharedOwnershipOverride } from "./adapters/tenureDetection";
+import { dedupeAgainstDirectListings } from "./adapters/dedupe";
 import { upsertListingsForSource } from "./listingsStore";
 import type { StoredSourceStatus } from "./types";
 
@@ -40,6 +42,7 @@ interface SyncStatusUpsertRow {
   duration_ms: number;
   error_message: string | null;
   extraction_method: string | null;
+  deduped_count: number;
 }
 
 async function upsertSyncStatus(row: SyncStatusUpsertRow): Promise<void> {
@@ -129,9 +132,35 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
       applySharedOwnershipOverride(listing, adapter.id)
     );
 
-    const diff = await upsertListingsForSource(adapter.id, normalizedListings);
+    // Aggregator sources (1newhomes, Benhams) only ever keep listings not
+    // already covered by a direct-developer source — see dedupe.ts. Direct
+    // developer sources skip this entirely (sourceType check is cheap and
+    // dedupeAgainstDirectListings would just be a no-op filter against
+    // itself otherwise). runAllAdapters() below always finishes every
+    // direct-developer adapter before starting any aggregator one, so this
+    // query sees the complete, freshly-synced set of direct listings.
+    const isAggregator = isAggregatorSource(adapter.id);
+    let dedupedCount = 0;
+    let listingsToStore = normalizedListings;
+    if (isAggregator) {
+      const dedupe = await dedupeAgainstDirectListings(normalizedListings);
+      listingsToStore = dedupe.kept;
+      dedupedCount = dedupe.droppedCount;
+      if (dedupedCount > 0) {
+        console.warn(
+          `[syncEngine] ${adapter.id}: dropped ${dedupedCount} listing(s) already covered by a direct ` +
+            `developer source: ${dedupe.droppedTitles.slice(0, 10).join(", ")}${dedupedCount > 10 ? ", ..." : ""}`
+        );
+      }
+    }
+
+    const diff = await upsertListingsForSource(
+      adapter.id,
+      listingsToStore,
+      isAggregator ? "aggregator" : "developer"
+    );
     const status: StoredSourceStatus =
-      normalizedListings.length === 0 ? "no_results" : "ok";
+      listingsToStore.length === 0 ? "no_results" : "ok";
 
     // A run that completed without throwing counts as a "successful run" for
     // staleness purposes, whether or not it found any listings — that's
@@ -144,13 +173,14 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
       last_success_at: lastRunAt,
       status,
       http_status: result.httpStatus ?? 200,
-      listings_found: normalizedListings.length,
+      listings_found: listingsToStore.length,
       added: diff.added,
       updated: diff.updated,
       removed: diff.removed,
       duration_ms: durationMs,
       error_message: null,
       extraction_method: result.extractionMethod ?? null,
+      deduped_count: dedupedCount,
     });
   } catch (err) {
     const durationMs = Date.now() - startedAt;
@@ -170,6 +200,7 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
       duration_ms: durationMs,
       error_message: message,
       extraction_method: null,
+      deduped_count: 0,
     });
   }
 }
@@ -177,9 +208,20 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
 /** Runs every registered adapter (or, if `sourceIds` is given, just those),
  * recording one sync_status row per source. Targeting specific sources
  * avoids re-queuing everything behind a shared render-concurrency limit when
- * only a few sources need a retry. */
+ * only a few sources need a retry.
+ *
+ * Direct-developer adapters always run to completion BEFORE any aggregator
+ * adapter starts (two sequential phases, not one big Promise.all) — dedupe.ts
+ * needs the complete, freshly-synced set of direct listings already in
+ * Supabase to correctly drop aggregator duplicates; running everything
+ * concurrently would let an aggregator's dedupe query race a direct
+ * source's write and silently miss real duplicates. */
 export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
   await pruneUnknownSources();
   const targets = sourceIds ? adapters.filter((a) => sourceIds.includes(a.id)) : adapters;
-  await Promise.all(targets.map((adapter) => runOne(adapter)));
+  const directTargets = targets.filter((a) => !isAggregatorSource(a.id));
+  const aggregatorTargets = targets.filter((a) => isAggregatorSource(a.id));
+
+  await Promise.all(directTargets.map((adapter) => runOne(adapter)));
+  await Promise.all(aggregatorTargets.map((adapter) => runOne(adapter)));
 }

@@ -26,6 +26,7 @@ interface SyncStatusRowDb {
   duration_ms: number | null;
   error_message: string | null;
   extraction_method: string | null;
+  deduped_count: number;
 }
 
 async function ensureInitialSyncHasRun(): Promise<void> {
@@ -50,7 +51,7 @@ export async function GET() {
   const { data: rows, error } = await supabase
     .from("sync_status")
     .select(
-      "source_id, source_name, last_run_at, last_success_at, status, http_status, listings_found, added, updated, removed, duration_ms, error_message, extraction_method"
+      "source_id, source_name, last_run_at, last_success_at, status, http_status, listings_found, added, updated, removed, duration_ms, error_message, extraction_method, deduped_count"
     )
     .order("source_name", { ascending: true })
     .returns<SyncStatusRowDb[]>();
@@ -73,6 +74,7 @@ export async function GET() {
     durationMs: r.duration_ms,
     errorMessage: r.error_message,
     extractionMethod: r.extraction_method,
+    dedupedCount: r.deduped_count,
   }));
 
   const summary = {

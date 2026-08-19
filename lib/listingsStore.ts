@@ -1,5 +1,6 @@
 import { requireSupabaseAdmin } from "./db";
 import type { AdapterListing } from "./adapters/types";
+import type { SourceType } from "./types";
 
 export interface DiffResult {
   added: number;
@@ -25,7 +26,8 @@ interface ExistingRow {
  */
 export async function upsertListingsForSource(
   sourceId: string,
-  incoming: AdapterListing[]
+  incoming: AdapterListing[],
+  sourceType: SourceType = "developer"
 ): Promise<DiffResult> {
   const admin = requireSupabaseAdmin();
 
@@ -69,6 +71,7 @@ export async function upsertListingsForSource(
       is_new_build: listing.isNewBuild,
       postcode: listing.postcode,
       area: listing.area,
+      source_type: sourceType,
       last_seen_at: now,
       active: true,
       // first_seen_at deliberately omitted from every row: on INSERT the
