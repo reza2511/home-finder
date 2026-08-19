@@ -12,7 +12,6 @@ import type { Listing } from "@/lib/types";
 export default function AppShell() {
   const [isStatusOpen, setStatusOpen] = useState(false);
   const [listings, setListings] = useState<Listing[] | null>(null);
-  const [developers, setDevelopers] = useState<DeveloperOption[] | null>(null);
   const [filters, setFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
 
   useEffect(() => {
@@ -30,32 +29,32 @@ export default function AppShell() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/developers", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setDevelopers(d.developers);
-      })
-      .catch(() => {
-        if (!cancelled) setDevelopers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Per-developer listing counts, from the full currently-loaded set — not
-  // re-narrowed by the other active filters, so the sidebar stays a stable
-  // "how many this source currently has" rather than jumping around as
-  // price/beds/etc. change (the grid itself still filters live on every
-  // change, via `filtered` below).
-  const counts = useMemo(() => {
-    const map: Record<string, number> = {};
+  // The developer filter's id→name list and per-developer counts are BOTH
+  // derived straight from the currently-loaded listings — never from a
+  // separate list (there used to be a GET /api/developers backed by
+  // london-developers.json, kept in sync with actual listings by hand).
+  // That's what let the sidebar drift out of sync with reality: a source
+  // could have real, active listings and still not show a tickbox if that
+  // separate list didn't happen to have a matching id. Deriving both from
+  // `listings` itself — which already carries the exact `sourceId`/
+  // `sourceName` every adapter wrote (see app/api/listings/route.ts's own
+  // join against sync_status, which gets its source_name directly from
+  // adapter.name at sync time, not from any JSON file) — makes that
+  // mismatch structurally impossible: any source with at least one active
+  // listing appears automatically, with the exact name it was actually
+  // synced under, and any source with zero listings simply isn't in this
+  // data at all, so there's nothing to filter out separately.
+  const { developerOptions, counts } = useMemo(() => {
+    const nameById = new Map<string, string>();
+    const countById: Record<string, number> = {};
     for (const listing of listings ?? []) {
-      map[listing.sourceId] = (map[listing.sourceId] ?? 0) + 1;
+      countById[listing.sourceId] = (countById[listing.sourceId] ?? 0) + 1;
+      if (!nameById.has(listing.sourceId)) nameById.set(listing.sourceId, listing.sourceName);
     }
-    return map;
+    const options: DeveloperOption[] = [...nameById.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { developerOptions: options, counts: countById };
   }, [listings]);
 
   const filtered = useMemo(
@@ -76,8 +75,8 @@ export default function AppShell() {
         <div className="page-layout">
           <aside className="page-sidebar">
             <DeveloperFilter
-              developers={developers ?? []}
-              loading={developers === null}
+              developers={developerOptions}
+              loading={listings === null}
               counts={counts}
               selected={filters.developers}
               onChange={(next) => setFilters({ ...filters, developers: next })}
