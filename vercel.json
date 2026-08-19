@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "app/api/sync/route.ts": { "memory": 1536 },
+    "app/api/status/route.ts": { "memory": 1536 }
+  }
+}

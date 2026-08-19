@@ -89,6 +89,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi } from "./autoAdapter";
 import { postcodeAreaIsLondon, UK_POSTCODE_RE } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://www.peabodynewhomes.co.uk/find-a-home";
 const BASE_URL = "https://www.peabodynewhomes.co.uk";
@@ -105,7 +106,7 @@ const NEXT_SELECTOR = "a.paging-item.__next";
 const ANALYTICS_DOMAIN_RE =
   /google-analytics\.com|googletagmanager\.com|doubleclick\.net|googlesyndication\.com|connect\.facebook\.net|facebook\.com\/tr|clarity\.ms|hotjar\.com|criteo\.com|matterport\.com|cdn-cgi\/challenge-platform/i;
 
-async function blockHeavyResources(page: import("playwright").Page): Promise<void> {
+async function blockHeavyResources(page: import("playwright-core").Page): Promise<void> {
   await page.route("**/*", (route) => {
     const request = route.request();
     const type = request.resourceType();
@@ -113,20 +114,6 @@ async function blockHeavyResources(page: import("playwright").Page): Promise<voi
     if (ANALYTICS_DOMAIN_RE.test(request.url())) return route.abort();
     return route.continue();
   });
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __peabodyBrowser: Promise<import("playwright").Browser> | undefined;
-}
-
-function getBrowser(): Promise<import("playwright").Browser> {
-  if (!globalThis.__peabodyBrowser) {
-    globalThis.__peabodyBrowser = import("playwright").then(({ chromium }) =>
-      chromium.launch({ headless: true, args: ["--disable-blink-features=AutomationControlled"] })
-    );
-  }
-  return globalThis.__peabodyBrowser;
 }
 
 // ---------- card parsing ----------
@@ -231,7 +218,7 @@ export const peabodyNewHomesAdapter: SourceAdapter = {
   name: "Peabody New Homes",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getBrowser();
+    const browser = await getSharedBrowser();
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       viewport: { width: 1366, height: 900 },

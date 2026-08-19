@@ -83,6 +83,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi, type RawExtractedItem } from "./autoAdapter";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { getSharedBrowser } from "./browser";
 
 const TARGET_URL =
   "https://www.berkeleygroup.co.uk/search-results?location=London%2C%20England&bedrooms=&propertyType=&price=";
@@ -99,7 +100,7 @@ const PROPERTIES_ENDPOINT_RE = /\/search_api\/properties\?.*dataSourcePageId=([^
 const ANALYTICS_DOMAIN_RE =
   /google-analytics\.com|googletagmanager\.com|doubleclick\.net|googlesyndication\.com|connect\.facebook\.net|facebook\.com\/tr|onetrust\.com|sitecorecloud\.io|virtualearth\.net|livechatinc\.com|hotjar\.com|clarity\.ms|criteo\.com/i;
 
-async function blockHeavyResources(page: import("playwright").Page): Promise<void> {
+async function blockHeavyResources(page: import("playwright-core").Page): Promise<void> {
   await page.route("**/*", (route) => {
     const request = route.request();
     const type = request.resourceType();
@@ -107,20 +108,6 @@ async function blockHeavyResources(page: import("playwright").Page): Promise<voi
     if (ANALYTICS_DOMAIN_RE.test(request.url())) return route.abort();
     return route.continue();
   });
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __berkeleyBrowser: Promise<import("playwright").Browser> | undefined;
-}
-
-function getBrowser(): Promise<import("playwright").Browser> {
-  if (!globalThis.__berkeleyBrowser) {
-    globalThis.__berkeleyBrowser = import("playwright").then(({ chromium }) =>
-      chromium.launch({ headless: true, args: ["--disable-blink-features=AutomationControlled"] })
-    );
-  }
-  return globalThis.__berkeleyBrowser;
 }
 
 // ---------- Berkeley API response shapes (only the fields actually used) ----------
@@ -286,7 +273,7 @@ export const berkeleyAdapter: SourceAdapter = {
   name: "Berkeley Group",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getBrowser();
+    const browser = await getSharedBrowser();
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       viewport: { width: 1366, height: 900 },

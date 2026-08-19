@@ -42,6 +42,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { discoverCandidateUrls } from "./urlDiscovery";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure, isExclusivelySharedOwnershipProvider } from "./tenureDetection";
+import { getSharedBrowser } from "./browser";
 
 const FETCH_TIMEOUT_MS = 15_000;
 // domcontentloaded rather than load/networkidle: many sites never go fully
@@ -155,29 +156,6 @@ function acquireRenderSlot(): Promise<() => void> {
   });
 }
 
-// Stored on globalThis (same pattern as lib/db.ts's connection singleton) so
-// that a Next.js dev-server hot-reload re-evaluating this module reuses the
-// existing browser process instead of orphaning it — a plain module-level
-// `let` here previously leaked a new Chromium process on every edit to this
-// file, and ~20 of them piling up starved every subsequent render into
-// timing out.
-declare global {
-  // eslint-disable-next-line no-var
-  var __autoAdapterBrowser: Promise<import("playwright").Browser> | undefined;
-}
-
-function getBrowser(): Promise<import("playwright").Browser> {
-  if (!globalThis.__autoAdapterBrowser) {
-    globalThis.__autoAdapterBrowser = import("playwright").then(({ chromium }) =>
-      // --disable-blink-features=AutomationControlled removes the most
-      // obvious automation tell (navigator.webdriver); this is "look like a
-      // normal browser", not fingerprint-spoofing or CAPTCHA-solving.
-      chromium.launch({ headless: true, args: ["--disable-blink-features=AutomationControlled"] })
-    );
-  }
-  return globalThis.__autoAdapterBrowser;
-}
-
 // Resource types that never affect extraction (we only ever read text/DOM/
 // JSON) but cost real load time — aborting them speeds up every render and
 // removes a common source of goto hangs on media-heavy pages.
@@ -193,7 +171,7 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "font", "media"]);
 const TRACKING_DOMAIN_RE =
   /google-analytics\.com|googletagmanager\.com|doubleclick\.net|googlesyndication\.com|connect\.facebook\.net|facebook\.com\/tr|hotjar\.com|segment\.(io|com)|mixpanel\.com|fullstory\.com|clarity\.ms|hs-(scripts|analytics)\.com|hsforms\.(com|net)|intercom\.io|drift\.com|optimizely\.com|criteo\.com|adroll\.com|taboola\.com|outbrain\.com|cloudflareinsights\.com|newrelic\.com|nr-data\.net|datadoghq\.com|amazon-adsystem\.com|adnxs\.com|bat\.bing\.com|analytics\.tiktok\.com|sc-static\.net|pinterest\.com\/ct|linkedin\.com\/px|yandex\.ru\/metrika/i;
 
-async function blockHeavyResources(page: import("playwright").Page): Promise<void> {
+async function blockHeavyResources(page: import("playwright-core").Page): Promise<void> {
   await page.route("**/*", (route) => {
     const request = route.request();
     if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
@@ -209,7 +187,7 @@ async function blockHeavyResources(page: import("playwright").Page): Promise<voi
 async function renderOnce(url: string): Promise<{ html: string; priceSelectorMatched: boolean }> {
   const release = await acquireRenderSlot();
   try {
-    const browser = await getBrowser();
+    const browser = await getSharedBrowser();
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       viewport: { width: 1366, height: 900 },

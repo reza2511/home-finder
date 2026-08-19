@@ -39,6 +39,7 @@
 import * as cheerio from "cheerio";
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
+import { getSharedBrowser } from "./browser";
 
 const BASE_URL = "https://www.ballymoregroup.com";
 const LISTINGS_URL = `${BASE_URL}/project`;
@@ -53,7 +54,7 @@ const USER_AGENT =
 const ANALYTICS_DOMAIN_RE =
   /googletagmanager\.com|google-analytics\.com|doubleclick\.net|googlesyndication\.com|connect\.facebook\.net|facebook\.com\/tr|cookiebot\.com|consentcdn\.cookiebot\.com|hotjar\.com|clarity\.ms/i;
 
-async function blockHeavyResources(page: import("playwright").Page): Promise<void> {
+async function blockHeavyResources(page: import("playwright-core").Page): Promise<void> {
   await page.route("**/*", (route) => {
     const request = route.request();
     const type = request.resourceType();
@@ -61,24 +62,6 @@ async function blockHeavyResources(page: import("playwright").Page): Promise<voi
     if (ANALYTICS_DOMAIN_RE.test(request.url())) return route.abort();
     return route.continue();
   });
-}
-
-// Stored on globalThis (same pattern as lib/db.ts's connection singleton and
-// lib/adapters/autoAdapter.ts's browser) so a Next.js dev-server hot-reload
-// re-evaluating this module reuses the existing browser process rather than
-// leaking a new Chromium process on every edit.
-declare global {
-  // eslint-disable-next-line no-var
-  var __ballymoreBrowser: Promise<import("playwright").Browser> | undefined;
-}
-
-function getBrowser(): Promise<import("playwright").Browser> {
-  if (!globalThis.__ballymoreBrowser) {
-    globalThis.__ballymoreBrowser = import("playwright").then(({ chromium }) =>
-      chromium.launch({ headless: true, args: ["--disable-blink-features=AutomationControlled"] })
-    );
-  }
-  return globalThis.__ballymoreBrowser;
 }
 
 /** Waits for a project card (listings page) or a £-price element (project
@@ -91,7 +74,7 @@ function getBrowser(): Promise<import("playwright").Browser> {
  * published price), and the subsequent HTML parse is what actually decides
  * whether anything usable came back. */
 async function waitForCardOrPrice(
-  page: import("playwright").Page,
+  page: import("playwright-core").Page,
   selector: string,
   context: string
 ): Promise<void> {
@@ -105,7 +88,7 @@ async function waitForCardOrPrice(
 }
 
 async function loadPage(
-  page: import("playwright").Page,
+  page: import("playwright-core").Page,
   url: string,
   selector: string
 ): Promise<{ status: number; html: string }> {
@@ -203,7 +186,7 @@ export const ballymoreAdapter: SourceAdapter = {
   name: "Ballymore",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getBrowser();
+    const browser = await getSharedBrowser();
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       viewport: { width: 1366, height: 900 },

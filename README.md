@@ -60,6 +60,18 @@ first load.
     what was actually received) is stored and shown in the Status Monitor.
   - `stale` — not stored; derived at read time (`lib/statusDerive.ts`) when
     there's been no successful run in the last 26h (syncs run every 12h).
+- **Browser-based adapters** (`lib/adapters/browser.ts`): every adapter that
+  needs a real rendered page (autoAdapter, Ballymore, Berkeley, Fairview,
+  L&Q, Peabody) shares one lazily-launched Chromium instance via
+  `getSharedBrowser()` instead of each launching its own. Locally this
+  resolves the Chromium `playwright` (a devDependency, only used to populate
+  the local browser cache) downloaded; on Vercel (`process.env.VERCEL` is
+  set) it launches `@sparticuz/chromium`'s serverless-compiled binary via
+  `playwright-core` instead, since a normal Chromium download doesn't run in
+  a Vercel serverless function. See that file's own header comment, and
+  `next.config.js` (`serverComponentsExternalPackages` /
+  `outputFileTracingIncludes`) for the two build-time steps that make the
+  binary actually ship with the deployed function.
 - **API**:
   - `GET /api/status` — every `sync_status` row (with `stale` derived) plus a
     summary count per status.

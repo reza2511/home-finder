@@ -59,6 +59,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi, type RawExtractedItem } from "./autoAdapter";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://lqhomes.com/search/?location=London%2C%20UK&place";
 const BASE_URL = "https://lqhomes.com";
@@ -73,7 +74,7 @@ const PROPERTIES_ENDPOINT_RE = /\/wp-json\/custom\/development\/(\d+)\/propertie
 const ANALYTICS_DOMAIN_RE =
   /google-analytics\.com|googletagmanager\.com|doubleclick\.net|googlesyndication\.com|google\.com\/pagead|connect\.facebook\.net|facebook\.com\/tr|cookie-script\.com|hotjar\.com|clarity\.ms|criteo\.com/i;
 
-async function blockHeavyResources(page: import("playwright").Page): Promise<void> {
+async function blockHeavyResources(page: import("playwright-core").Page): Promise<void> {
   await page.route("**/*", (route) => {
     const request = route.request();
     const type = request.resourceType();
@@ -81,20 +82,6 @@ async function blockHeavyResources(page: import("playwright").Page): Promise<voi
     if (ANALYTICS_DOMAIN_RE.test(request.url())) return route.abort();
     return route.continue();
   });
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __lqHomesBrowser: Promise<import("playwright").Browser> | undefined;
-}
-
-function getBrowser(): Promise<import("playwright").Browser> {
-  if (!globalThis.__lqHomesBrowser) {
-    globalThis.__lqHomesBrowser = import("playwright").then(({ chromium }) =>
-      chromium.launch({ headless: true, args: ["--disable-blink-features=AutomationControlled"] })
-    );
-  }
-  return globalThis.__lqHomesBrowser;
 }
 
 // ---------- L&Q API response shapes (only the fields actually used) ----------
@@ -303,7 +290,7 @@ export const lqHomesAdapter: SourceAdapter = {
   name: "L&Q",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getBrowser();
+    const browser = await getSharedBrowser();
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       viewport: { width: 1366, height: 900 },

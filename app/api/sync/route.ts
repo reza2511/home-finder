@@ -3,6 +3,14 @@ import { runAllAdapters } from "@/lib/syncEngine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Browser-based adapters are slow (Playwright render + price-selector wait
+// per source, see ADAPTER_TIMEOUT_MS in lib/syncEngine.ts) — the Vercel
+// default of 10s is nowhere near enough. 300s is this route's own ask; the
+// value that actually applies is capped by the Vercel plan (Hobby: 60s max,
+// can't be raised past that; Pro: up to 300s by default, up to 800s with
+// Fluid Compute enabled) — see the deployment notes for what that means for
+// syncing every source in one request versus a few `?ids=` at a time.
+export const maxDuration = 300;
 
 // Triggers a manual sync of every registered source adapter (or, with
 // ?ids=a,b,c, just those — useful for retrying a handful of sources without

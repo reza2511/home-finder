@@ -7,6 +7,10 @@ import type { StatusResponse, StoredSourceStatus, SyncStatusRow } from "@/lib/ty
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// This route's first-ever hit can trigger a full browser-based sync (see
+// ensureInitialSyncHasRun below) — same reasoning/caveats as
+// app/api/sync/route.ts's maxDuration.
+export const maxDuration = 300;
 
 interface SyncStatusRowDb {
   source_id: string;
