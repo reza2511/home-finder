@@ -9,6 +9,8 @@ import RefreshHistory from "./RefreshHistory";
 import ListingsGrid from "./ListingsGrid";
 import { DEFAULT_FILTERS, filterListings, type ListingFilters } from "@/lib/filterListings";
 import { formatDateTime } from "@/lib/relativeTime";
+import { fetchSession } from "@/lib/authClient";
+import { addFavourite, favouriteKey, fetchFavouriteKeys, removeFavourite } from "@/lib/favouritesClient";
 import type { HistorySnapshotDetail } from "@/lib/historyClient";
 import type { Listing } from "@/lib/types";
 
@@ -21,6 +23,9 @@ export default function AppShell() {
   // filtering, the grid) reads from `activeListings`, so a recalled
   // snapshot flows through the exact same pipeline live data does.
   const [historySnapshot, setHistorySnapshot] = useState<HistorySnapshotDetail | null>(null);
+  // null = not logged in (or not loaded yet) — ListingsGrid hides every
+  // card's heart icon entirely in that case, not just the click action.
+  const [favouriteKeys, setFavouriteKeys] = useState<Set<string> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +41,52 @@ export default function AppShell() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSession()
+      .then((s) => {
+        if (cancelled || !s.authenticated) return;
+        return fetchFavouriteKeys().then((keys) => !cancelled && setFavouriteKeys(keys));
+      })
+      .catch(() => {
+        // Best-effort — a failed load just means no hearts show as filled
+        // yet; the user can still favourite, and the next successful load
+        // reconciles it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleToggleFavourite(listing: Listing) {
+    const key = favouriteKey(listing.sourceId, listing.externalId);
+    const currentlyFavourited = favouriteKeys?.has(key) ?? false;
+
+    // Optimistic update — reverted below if the server call fails, so the
+    // heart never lies about a state that didn't actually take.
+    setFavouriteKeys((prev) => {
+      const next = new Set(prev ?? []);
+      if (currentlyFavourited) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+    try {
+      if (currentlyFavourited) {
+        await removeFavourite(listing.sourceId, listing.externalId);
+      } else {
+        await addFavourite(listing.sourceId, listing.externalId);
+      }
+    } catch {
+      setFavouriteKeys((prev) => {
+        const next = new Set(prev ?? []);
+        if (currentlyFavourited) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+    }
+  }
 
   const activeListings = historySnapshot ? historySnapshot.listings : listings;
 
@@ -120,7 +171,7 @@ export default function AppShell() {
             {activeListings === null ? (
               <p className="listings-loading">Loading listings…</p>
             ) : (
-              <ListingsGrid listings={filtered} />
+              <ListingsGrid listings={filtered} favouriteKeys={favouriteKeys} onToggleFavourite={handleToggleFavourite} />
             )}
           </div>
         </div>

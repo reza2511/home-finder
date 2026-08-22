@@ -1,4 +1,5 @@
 import { requireSupabaseAdmin } from "./db";
+import { recordRemovedFavourites } from "./favouritesStore";
 import type { AdapterListing } from "./adapters/types";
 import type { SourceType } from "./types";
 
@@ -11,6 +12,8 @@ export interface DiffResult {
 interface ExistingRow {
   external_id: string;
   active: boolean;
+  title: string;
+  url: string;
 }
 
 /**
@@ -23,6 +26,10 @@ interface ExistingRow {
  * Writes via the service_role client (requireSupabaseAdmin) since RLS has
  * no anon/authenticated insert or update policy on `listings` — see
  * supabase/migrations/0001_init.sql.
+ *
+ * A listing going inactive that was favourited also gets recorded as a
+ * removal notification (lib/favouritesStore.ts's recordRemovedFavourites)
+ * and un-favourited — see that function's own doc comment.
  */
 export async function upsertListingsForSource(
   sourceId: string,
@@ -33,7 +40,7 @@ export async function upsertListingsForSource(
 
   const { data: existingRows, error: fetchErr } = await admin
     .from("listings")
-    .select("external_id, active")
+    .select("external_id, active, title, url")
     .eq("source_id", sourceId)
     .returns<ExistingRow[]>();
   if (fetchErr) {
@@ -101,6 +108,20 @@ export async function upsertListingsForSource(
     if (removeErr) {
       throw new Error(`upsertListingsForSource(${sourceId}): failed to mark removed listings inactive: ${removeErr.message}`);
     }
+
+    // If any of these were favourited, record a removal notification and
+    // un-favourite them (lib/favouritesStore.ts) — best-effort, never lets
+    // this fail the sync itself. title/url are each row's real, last-known
+    // values (read above, before this update touched anything but
+    // `active`), not guessed.
+    const existingByExternalId = new Map((existingRows ?? []).map((r) => [r.external_id, r]));
+    await recordRemovedFavourites(
+      sourceId,
+      toRemove.map((externalId) => {
+        const row = existingByExternalId.get(externalId)!;
+        return { externalId, title: row.title, url: row.url };
+      })
+    );
   }
 
   return { added, updated, removed: toRemove.length };
