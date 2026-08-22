@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
-import { requireSupabaseAdmin } from "@/lib/db";
+import { supabase } from "@/lib/db";
+import type { SourceBreakdownEntry } from "@/lib/historyStore";
 import type { Listing } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,21 +11,19 @@ interface SnapshotRow {
   captured_at: string;
   listing_count: number;
   listings: Listing[];
+  sources: SourceBreakdownEntry[] | null;
   sync_runs: { started_at: string } | null;
 }
 
-// Same real, server-side session check as POST /api/sync — a public
-// visitor gets 401 regardless of what the front-end shows or hides, and
-// can't recall a past snapshot's data even by guessing/enumerating an id.
+// Public — recalling a past snapshot is for everyone, same as GET
+// /api/listings. Reads via the anon client, subject to the public SELECT
+// RLS policy on both tables (see supabase/migrations/
+// 0005_history_public_and_source_breakdown.sql). Only capturing a *new*
+// snapshot requires login (POST /api/history/capture).
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
-  if (!isAuthenticated()) {
-    return NextResponse.json({ error: "Unauthorized — please log in to view refresh history." }, { status: 401 });
-  }
-
-  const admin = requireSupabaseAdmin();
-  const { data, error } = await admin
+  const { data, error } = await supabase
     .from("sync_history_snapshots")
-    .select("id, captured_at, listing_count, listings, sync_runs(started_at)")
+    .select("id, captured_at, listing_count, listings, sources, sync_runs(started_at)")
     .eq("id", params.id)
     .maybeSingle<SnapshotRow>();
 
@@ -41,6 +39,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     runStartedAt: data.sync_runs?.started_at ?? data.captured_at,
     capturedAt: data.captured_at,
     listingCount: data.listing_count,
+    sources: data.sources ?? [],
     listings: data.listings,
   });
 }

@@ -18,17 +18,18 @@ interface Props {
   onSelect: (snapshot: HistorySnapshotDetail) => void;
 }
 
-// Visible only to a logged-in user — checked the same way every other
-// protected control in this app checks it (Header, StatusMonitorModal): a
-// real session fetched from GET /api/auth/session, itself backed by the
-// same server-side cookie check as every history API route. A public
-// visitor never sees this section at all, not even a disabled/hint version
-// — it renders nothing until authenticated is confirmed true.
+// Viewing history is public — every visitor sees the list and can recall a
+// snapshot, no login needed (GET /api/history, GET /api/history/:id are
+// both public routes — see their own files). Only *capturing* a new
+// snapshot is login-only: the "Capture history now" button below is
+// gated on `authenticated`, and POST /api/history/capture independently
+// enforces that server-side regardless of what this component renders.
 export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
   const [authenticated, setAuthenticated] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshotSummary[] | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function refreshList() {
@@ -37,25 +38,25 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+
+    fetchHistoryList()
+      .then((list) => !cancelled && setSnapshots(list))
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Failed to load history"));
+
     fetchSession()
-      .then((s) => {
-        if (cancelled) return;
-        setAuthenticated(s.authenticated);
-        if (s.authenticated) {
-          fetchHistoryList()
-            .then((list) => !cancelled && setSnapshots(list))
-            .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Failed to load history"));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setAuthenticated(false);
-      });
+      .then((s) => !cancelled && setAuthenticated(s.authenticated))
+      .catch(() => !cancelled && setAuthenticated(false));
+
+    function onDocClick() {
+      setOpenInfoId(null);
+    }
+    document.addEventListener("click", onDocClick);
+
     return () => {
       cancelled = true;
+      document.removeEventListener("click", onDocClick);
     };
   }, []);
-
-  if (!authenticated) return null;
 
   async function handleClick(id: string) {
     setLoadingId(id);
@@ -70,11 +71,11 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
     }
   }
 
-  // Instant capture — does NOT trigger a sync and does NOT wait 2h; saves
-  // whatever's currently in `listings` right now (see POST
-  // /api/history/capture). Re-fetches the list afterwards so the new
-  // snapshot (and the "oldest dropped" effect of the 3-kept cap) shows up
-  // immediately, same as after picking a snapshot.
+  // Instant capture — does NOT trigger a sync and does NOT wait for the
+  // daily 06:00 cron; saves whatever's currently in `listings` right now
+  // (see POST /api/history/capture). Re-fetches the list afterwards so the
+  // new snapshot (and the "oldest dropped past 10" effect) shows up
+  // immediately.
   async function handleCaptureNow() {
     setCapturing(true);
     setError(null);
@@ -92,14 +93,16 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
     <section className="refresh-history" aria-label="Refresh history">
       <div className="refresh-history__header">
         <h2 className="dev-filter__heading">Refresh history</h2>
-        <button
-          type="button"
-          className="btn btn--ghost refresh-history__capture-btn"
-          onClick={handleCaptureNow}
-          disabled={capturing}
-        >
-          {capturing ? "Capturing…" : "Capture history now"}
-        </button>
+        {authenticated && (
+          <button
+            type="button"
+            className="btn btn--ghost refresh-history__capture-btn"
+            onClick={handleCaptureNow}
+            disabled={capturing}
+          >
+            {capturing ? "Capturing…" : "Capture history now"}
+          </button>
+        )}
       </div>
 
       {error && <div className="status-banner status-banner--error">{error}</div>}
@@ -107,20 +110,58 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
       {snapshots === null ? (
         <p className="dev-filter__empty">Loading…</p>
       ) : snapshots.length === 0 ? (
-        <p className="dev-filter__empty">No completed snapshots yet — the first sync's snapshot is captured 2h after it starts.</p>
+        <p className="dev-filter__empty">No snapshots yet — one is captured automatically every day at 06:00.</p>
       ) : (
         <div className="refresh-history__list">
           {snapshots.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={`refresh-history__item${activeSnapshotId === s.id ? " refresh-history__item--active" : ""}`}
-              onClick={() => handleClick(s.id)}
-              disabled={loadingId === s.id}
-              aria-pressed={activeSnapshotId === s.id}
-            >
-              {loadingId === s.id ? "Loading…" : formatDateTime(s.runStartedAt)}
-            </button>
+            <div key={s.id} className="refresh-history__row">
+              <button
+                type="button"
+                className={`refresh-history__item${activeSnapshotId === s.id ? " refresh-history__item--active" : ""}`}
+                onClick={() => handleClick(s.id)}
+                disabled={loadingId === s.id}
+                aria-pressed={activeSnapshotId === s.id}
+              >
+                {loadingId === s.id ? "Loading…" : formatDateTime(s.runStartedAt)}
+              </button>
+              <button
+                type="button"
+                className="refresh-history__info"
+                aria-label={`Details for the ${formatDateTime(s.capturedAt)} capture`}
+                aria-expanded={openInfoId === s.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenInfoId((cur) => (cur === s.id ? null : s.id));
+                }}
+              >
+                ⓘ
+              </button>
+              <div
+                className={`refresh-history__tooltip${openInfoId === s.id ? " refresh-history__tooltip--open" : ""}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="refresh-history__tooltip-row">
+                  <strong>Captured:</strong> {formatDateTime(s.capturedAt)}
+                </div>
+                <div className="refresh-history__tooltip-row">
+                  <strong>Total houses:</strong> {s.listingCount}
+                </div>
+                <div className="refresh-history__tooltip-row">
+                  <strong>
+                    {s.sources.length} source{s.sources.length === 1 ? "" : "s"} updated:
+                  </strong>
+                </div>
+                {s.sources.length > 0 && (
+                  <ul className="refresh-history__tooltip-sources">
+                    {s.sources.map((src) => (
+                      <li key={src.sourceId}>
+                        {src.sourceName} <span className="refresh-history__tooltip-count">{src.listingCount}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       )}

@@ -1,10 +1,17 @@
 import type { Listing } from "./types";
 
+export interface SourceBreakdownEntry {
+  sourceId: string;
+  sourceName: string;
+  listingCount: number;
+}
+
 export interface HistorySnapshotSummary {
   id: string;
   runStartedAt: string;
   capturedAt: string;
   listingCount: number;
+  sources: SourceBreakdownEntry[];
 }
 
 export interface HistorySnapshotDetail extends HistorySnapshotSummary {
@@ -31,8 +38,9 @@ export async function fetchHistorySnapshot(id: string): Promise<HistorySnapshotD
 }
 
 /** Manual, instant capture — the "Capture history now" button. Doesn't
- * trigger a sync or wait for the 2h delay; saves whatever's currently in
- * `listings` right now, in the same format the automatic capture uses. */
+ * trigger a sync; saves whatever's currently in `listings` right now, in
+ * the same format the daily automatic capture uses. Requires login — the
+ * server rejects an unauthenticated request regardless of this call site. */
 export async function captureHistoryNow(): Promise<HistorySnapshotSummary> {
   const res = await fetch("/api/history/capture", { method: "POST" });
   if (!res.ok) {

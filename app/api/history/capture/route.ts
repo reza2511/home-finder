@@ -8,9 +8,10 @@ export const dynamic = "force-dynamic";
 // can be large, so keep some headroom beyond the Vercel default.
 export const maxDuration = 60;
 
-// Same real, server-side session check as POST /api/sync and GET
-// /api/history — a public visitor gets 401 regardless of what the UI does
-// or doesn't show.
+// Same real, server-side session check as POST /api/sync — a public
+// visitor gets 401 regardless of what the UI does or doesn't show. Unlike
+// GET /api/history and GET /api/history/:id (public — viewing history is
+// for everyone), *capturing* a new snapshot stays login-only.
 export async function POST() {
   if (!isAuthenticated()) {
     return NextResponse.json({ error: "Unauthorized — please log in to capture history." }, { status: 401 });

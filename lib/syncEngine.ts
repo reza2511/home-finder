@@ -1,7 +1,6 @@
 import { pruneUnknownSources, requireSupabaseAdmin } from "./db";
 import { adapters } from "./adapters";
 import { isAggregatorSource } from "./developers";
-import { recordSyncRunStart } from "./historyStore";
 import {
   AdapterAutoExtractionError,
   AdapterHttpError,
@@ -218,15 +217,12 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
  * concurrently would let an aggregator's dedupe query race a direct
  * source's write and silently miss real duplicates.
  *
- * A *full* run (no `sourceIds` — i.e. every source) also records a
- * `sync_runs` row for the refresh-history feature (lib/historyStore.ts): a
- * targeted `?ids=` retry of a handful of sources isn't "a sync" in the
- * sense the history sidebar means, so it's deliberately excluded. */
+ * Refresh history (lib/historyStore.ts) is no longer tied to a sync run at
+ * all — it's captured on a fixed daily schedule (Vercel Cron) or on demand
+ * (the "Capture history now" button), independent of when/whether a sync
+ * happens to run. */
 export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
   await pruneUnknownSources();
-  if (!sourceIds) {
-    await recordSyncRunStart();
-  }
   const targets = sourceIds ? adapters.filter((a) => sourceIds.includes(a.id)) : adapters;
   const directTargets = targets.filter((a) => !isAggregatorSource(a.id));
   const aggregatorTargets = targets.filter((a) => isAggregatorSource(a.id));

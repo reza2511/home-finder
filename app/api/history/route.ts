@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { supabase } from "@/lib/db";
 import { listRecentSnapshots } from "@/lib/historyStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Same real, server-side session check as POST /api/sync — a public
-// visitor gets 401 regardless of what the front-end shows or hides. See
-// lib/auth.ts.
+// Public — viewing history is for everyone, same as GET /api/listings and
+// GET /api/status. Only capturing a new snapshot (POST /api/history/capture)
+// requires login. Reads via the anon client, subject to the public SELECT
+// RLS policy on sync_history_snapshots/sync_runs (see supabase/migrations/
+// 0005_history_public_and_source_breakdown.sql) — the same "real" public
+// access listings/sync_status already have, not just an absent app-level
+// check.
 export async function GET() {
-  if (!isAuthenticated()) {
-    return NextResponse.json({ error: "Unauthorized — please log in to view refresh history." }, { status: 401 });
-  }
-
   try {
-    const snapshots = await listRecentSnapshots();
+    const snapshots = await listRecentSnapshots(supabase);
     return NextResponse.json({ snapshots });
   } catch (err) {
     return NextResponse.json(
