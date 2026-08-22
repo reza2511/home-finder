@@ -13,6 +13,7 @@ export async function fetchStatus(): Promise<StatusResponse> {
 export async function triggerSync(): Promise<void> {
   const res = await fetch("/api/sync", { method: "POST" });
   if (!res.ok) {
-    throw new Error(`Failed to trigger sync (${res.status})`);
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Failed to trigger sync (${res.status})`);
   }
 }

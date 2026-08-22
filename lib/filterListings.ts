@@ -10,6 +10,13 @@ export interface ListingFilters {
   maxPrice: number | null;
   /** Empty = no tenure filtering (checkboxes act as an OR filter when checked). */
   tenure: TenureValue[];
+  /** Tenures to actively hide, independent of `tenure` above — e.g.
+   * "Exclude shared ownership". Empty = nothing excluded. A listing whose
+   * tenure is unknown (null) is never excluded by this — excluding is only
+   * ever applied to a tenure the source actually stated, never guessed.
+   * When a value appears in both `tenure` and `excludeTenure` at once,
+   * exclude wins (checked in filterListings after the include check). */
+  excludeTenure: TenureValue[];
   newBuildOnly: boolean;
   /** Matched against postcode and area, case-insensitively. */
   search: string;
@@ -28,6 +35,7 @@ export const DEFAULT_FILTERS: ListingFilters = {
   minPrice: null,
   maxPrice: null,
   tenure: [],
+  excludeTenure: [],
   newBuildOnly: false,
   search: "",
   developers: null,
@@ -60,6 +68,14 @@ export function filterListings(listings: Listing[], filters: ListingFilters): Li
       return false;
     }
 
+    if (
+      filters.excludeTenure.length > 0 &&
+      listing.tenure !== null &&
+      filters.excludeTenure.includes(listing.tenure)
+    ) {
+      return false;
+    }
+
     if (filters.newBuildOnly && !listing.isNewBuild) return false;
 
     if (filters.developers !== null && !filters.developers.includes(listing.sourceId)) {
@@ -82,6 +98,7 @@ export function isDefaultFilters(filters: ListingFilters): boolean {
     filters.minPrice == null &&
     filters.maxPrice == null &&
     filters.tenure.length === 0 &&
+    filters.excludeTenure.length === 0 &&
     !filters.newBuildOnly &&
     filters.search.trim() === "" &&
     filters.developers === null

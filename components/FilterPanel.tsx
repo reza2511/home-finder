@@ -50,6 +50,13 @@ export default function FilterPanel({ filters, onChange, resultCount, totalCount
     patch({ tenure: next });
   }
 
+  function toggleExcludeTenure(value: TenureValue) {
+    const next = filters.excludeTenure.includes(value)
+      ? filters.excludeTenure.filter((t) => t !== value)
+      : [...filters.excludeTenure, value];
+    patch({ excludeTenure: next });
+  }
+
   return (
     <section className="filter-panel" aria-label="Filter listings">
       <div className="filter-panel__top">
@@ -143,6 +150,22 @@ export default function FilterPanel({ filters, onChange, resultCount, totalCount
                   type="checkbox"
                   checked={filters.tenure.includes(opt.value)}
                   onChange={() => toggleTenure(opt.value)}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="filter-group">
+          <span className="filter-group__label">Exclude tenure</span>
+          <div className="filter-checkboxes filter-checkboxes--exclude" role="group" aria-label="Exclude tenure">
+            {TENURE_OPTIONS.map((opt) => (
+              <label key={opt.value} className="filter-checkbox">
+                <input
+                  type="checkbox"
+                  checked={filters.excludeTenure.includes(opt.value)}
+                  onChange={() => toggleExcludeTenure(opt.value)}
                 />
                 {opt.label}
               </label>

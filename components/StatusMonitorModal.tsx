@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchStatus, triggerSync } from "@/lib/statusClient";
+import { fetchSession } from "@/lib/authClient";
 import { formatRelativeTime } from "@/lib/relativeTime";
 import type { SourceStatus, SyncStatusRow } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
@@ -52,6 +53,25 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Run sync now" is only ever offered to a logged-in operator — the real
+  // protection is server-side (POST /api/sync rejects an unauthenticated
+  // request regardless of this), this just avoids showing a button that
+  // would only ever come back 401 for a public visitor.
+  const [authenticated, setAuthenticated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSession()
+      .then((s) => {
+        if (!cancelled) setAuthenticated(s.authenticated);
+      })
+      .catch(() => {
+        if (!cancelled) setAuthenticated(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,14 +159,20 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
         <div className="modal__header">
           <h2 id="status-monitor-title">Status Monitor</h2>
           <div className="modal__header-actions">
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={handleRunSync}
-              disabled={syncing}
-            >
-              {syncing ? "Syncing…" : "Run sync now"}
-            </button>
+            {authenticated ? (
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleRunSync}
+                disabled={syncing}
+              >
+                {syncing ? "Syncing…" : "Run sync now"}
+              </button>
+            ) : (
+              <a href="/login" className="btn btn--ghost">
+                Log in to sync
+              </a>
+            )}
             <button
               type="button"
               className="modal__close"
