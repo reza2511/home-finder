@@ -81,6 +81,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi, type RawExtractedItem } from "./autoAdapter";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://www.fairview.co.uk/find-your-new-home/";
@@ -222,6 +223,7 @@ function extractFromRenderedCards(html: string): RawExtractedItem[] {
       postcode: postcodeMatch ? postcodeMatch[0].toUpperCase() : null,
       image: imgSrc ? new URL(imgSrc, BASE_URL).toString() : null,
       tenure: detectTenure(text),
+      rawText: text,
     });
   });
 
@@ -429,7 +431,7 @@ export const fairviewNewHomesAdapter: SourceAdapter = {
               bedrooms: typeof plot.bedrooms === "number" ? plot.bedrooms : null,
               bedroomType: null, // not published per room
               tenure: detectTenure(`${dev.title} ${dev.products ?? ""} ${plot.description ?? ""} ${plot.homeType ?? ""}`),
-              isNewBuild: true,
+              isNewBuild: detectIsNewBuild(`${dev.title} ${plot.description ?? ""}`).isNewBuild,
               postcode,
               area,
             });
@@ -463,7 +465,7 @@ export const fairviewNewHomesAdapter: SourceAdapter = {
             bedrooms: item.bedrooms,
             bedroomType: null,
             tenure: item.tenure,
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
             postcode: item.postcode ?? "",
             area: "",
           }));
@@ -494,7 +496,7 @@ export const fairviewNewHomesAdapter: SourceAdapter = {
             bedrooms: item.bedrooms,
             bedroomType: null,
             tenure: item.tenure,
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
             postcode: item.postcode ?? "",
             area: "",
           }));

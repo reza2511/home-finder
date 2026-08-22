@@ -50,6 +50,7 @@
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://www.redrow.co.uk/locations/london/";
@@ -101,6 +102,7 @@ interface ParsedPlot {
   bedrooms: number;
   bedroomLabel: string;
   price: number;
+  isNewBuild: boolean;
 }
 
 function parsePlots(html: string): ParsedPlot[] {
@@ -125,6 +127,7 @@ function parsePlots(html: string): ParsedPlot[] {
       bedrooms,
       bedroomLabel,
       price,
+      isNewBuild: detectIsNewBuild(featuresBlock.replace(/<[^>]+>/g, " ")).isNewBuild,
     });
   }
   return plots;
@@ -246,7 +249,7 @@ export const redrowAdapter: SourceAdapter = {
             bedrooms: plot.bedrooms,
             bedroomType: null, // not published per room
             tenure: null, // not published anywhere on this site
-            isNewBuild: true,
+            isNewBuild: plot.isNewBuild,
             postcode,
             area: dev.town ?? "",
           });

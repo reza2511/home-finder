@@ -56,6 +56,7 @@
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const CSV_URL = "https://www.countrysidehomes.com/data/developments/csv";
@@ -229,7 +230,7 @@ export const countrysideAdapter: SourceAdapter = {
           bedrooms,
           bedroomType: null, // not published per room
           tenure: detectTenure(row.description), // always null today — see file header
-          isNewBuild: true,
+          isNewBuild: detectIsNewBuild(`${row.name} ${row.description}`).isNewBuild,
           postcode: (row["Address.postal_code"] || "").trim(),
           area: (row["Address.city"] || "").trim(),
         });

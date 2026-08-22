@@ -44,6 +44,7 @@
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter, TenureValue } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 
 const BASE_URL = "https://www.bellway.co.uk";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -167,6 +168,7 @@ interface ParsedPlot {
   bedrooms: number | null;
   image: string | null;
   tenure: TenureValue | null;
+  isNewBuild: boolean;
 }
 
 // A genuine per-unit price card is always a single "From £X" value —
@@ -227,6 +229,7 @@ function parseDevelopmentPlots(html: string, devUrl: string): ParsedPlot[] {
       bedrooms: isStudio ? 0 : bedMatch ? parseInt(bedMatch[1], 10) : null,
       image: imgMatch ? absoluteUrl(imgMatch[1]) : null,
       tenure: detectTenure(text),
+      isNewBuild: detectIsNewBuild(text).isNewBuild,
     });
   }
   return plots;
@@ -323,7 +326,7 @@ export const bellwayLondonAdapter: SourceAdapter = {
           bedrooms: plot.bedrooms,
           bedroomType: null, // not published per room
           tenure: plot.tenure,
-          isNewBuild: true,
+          isNewBuild: plot.isNewBuild,
           postcode,
           area,
         });

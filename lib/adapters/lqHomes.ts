@@ -59,6 +59,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi, type RawExtractedItem } from "./autoAdapter";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://lqhomes.com/search/?location=London%2C%20UK&place";
@@ -235,7 +236,12 @@ function buildListing(dev: LqDevelopment, prop: LqProperty, devArea: { postcode:
       // isn't the tenure category that matters here, so `plot_type`'s
       // explicit "shared_ownership" wins outright over that text.
       tenure: detectTenure(acf.plot_tenure, { forceSharedOwnership: isSharedOwnership }),
-      isNewBuild: true,
+      // No free-text description published per plot here (checked directly
+      // — acf only has structured fields) — detectIsNewBuild still runs
+      // over whatever real text exists (plot label + development name)
+      // rather than being hardcoded, defaulting true since L&Q sells shared
+      // ownership/new-build homes only, never resale, on this site.
+      isNewBuild: detectIsNewBuild(`${plotLabel} ${devName}`).isNewBuild,
       postcode: devArea.postcode,
       area: devArea.area,
     },
@@ -279,6 +285,7 @@ function extractFromRenderedCards(html: string): RawExtractedItem[] {
       postcode: postcodeMatch ? postcodeMatch[0].toUpperCase() : null,
       image: imgSrc ? new URL(imgSrc, BASE_URL).toString() : null,
       tenure: detectTenure(text),
+      rawText: text,
     });
   });
 
@@ -473,7 +480,7 @@ export const lqHomesAdapter: SourceAdapter = {
             bedrooms: item.bedrooms,
             bedroomType: null,
             tenure: item.tenure,
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
             postcode: item.postcode ?? "",
             area: "",
           }));
@@ -505,7 +512,7 @@ export const lqHomesAdapter: SourceAdapter = {
             bedrooms: item.bedrooms,
             bedroomType: null,
             tenure: item.tenure,
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
             postcode: item.postcode ?? "",
             area: "",
           }));

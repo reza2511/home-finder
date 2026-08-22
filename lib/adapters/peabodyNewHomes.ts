@@ -89,6 +89,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi } from "./autoAdapter";
 import { postcodeAreaIsLondon, UK_POSTCODE_RE } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://www.peabodynewhomes.co.uk/find-a-home";
@@ -377,7 +378,7 @@ export const peabodyNewHomesAdapter: SourceAdapter = {
           bedrooms: singleBedroomCount(card.description),
           bedroomType: null, // not published per room
           tenure,
-          isNewBuild: true,
+          isNewBuild: detectIsNewBuild(`${card.name} ${card.tags.join(" ")} ${card.description}`).isNewBuild,
           postcode,
           area,
         });
@@ -410,7 +411,7 @@ export const peabodyNewHomesAdapter: SourceAdapter = {
               bedrooms: item.bedrooms,
               bedroomType: null,
               tenure: item.tenure,
-              isNewBuild: true,
+              isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
               postcode: item.postcode ?? "",
               area: "",
             });

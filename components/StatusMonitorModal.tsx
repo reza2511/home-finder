@@ -235,7 +235,10 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
                           </span>
                         ) : s.status === "ok" ? (
                           <span className="status-table__muted">
-                            +{s.added} added · {s.updated} updated · -{s.removed}
+                            +{s.added} added · {s.updated} updated ·{" "}
+                            <span className={s.removed > 0 ? "status-table__removed" : undefined}>
+                              −{s.removed} removed
+                            </span>
                             {s.extractionMethod ? ` · via ${s.extractionMethod}` : ""}
                           </span>
                         ) : (

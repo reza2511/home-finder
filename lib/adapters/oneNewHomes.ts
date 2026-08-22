@@ -63,6 +63,7 @@ import * as cheerio from "cheerio";
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://1newhomes.com/new-homes/";
@@ -252,7 +253,11 @@ export const oneNewHomesAdapter: SourceAdapter = {
           bedrooms: singleBedroomCount(card.bedsText),
           bedroomType: null, // not published per room
           tenure: detectTenure(`${card.bedsText} ${card.intro}`),
-          isNewBuild: true,
+          // This being a "new homes" aggregator by its own stated scope
+          // (see file header) is already reason enough to default true —
+          // detectIsNewBuild still genuinely checks the card's own name +
+          // intro text for a resale signal first, never just assumed blind.
+          isNewBuild: detectIsNewBuild(`${card.name} ${card.intro}`).isNewBuild,
           postcode: "", // never published on this list page — see file header
           area: card.area,
         });

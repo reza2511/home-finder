@@ -9,6 +9,7 @@ import {
 } from "./adapters/types";
 import { isBotBlockSignal } from "./adapters/blockDetection";
 import { applySharedOwnershipOverride } from "./adapters/tenureDetection";
+import { applyNewBuildOverride } from "./adapters/newBuildDetection";
 import { dedupeAgainstDirectListings } from "./adapters/dedupe";
 import { upsertListingsForSource } from "./listingsStore";
 import type { StoredSourceStatus } from "./types";
@@ -126,11 +127,14 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
     const durationMs = Date.now() - startedAt;
 
     // Post-adapter normalization: applied to every source's listings here,
-    // in one place, rather than trusting each adapter's own tenure logic
-    // individually — see applySharedOwnershipOverride's own doc comment.
-    const normalizedListings = result.listings.map((listing) =>
-      applySharedOwnershipOverride(listing, adapter.id)
-    );
+    // in one place, rather than trusting each adapter's own tenure/new-build
+    // logic individually — see applySharedOwnershipOverride's and
+    // applyNewBuildOverride's own doc comments. Errs toward inclusion: a
+    // listing only ever gets flagged NOT new build on a real resale signal
+    // in its own text, never for lack of one.
+    const normalizedListings = result.listings
+      .map((listing) => applySharedOwnershipOverride(listing, adapter.id))
+      .map((listing) => applyNewBuildOverride(listing));
 
     // Aggregator sources (1newhomes, Benhams) only ever keep listings not
     // already covered by a direct-developer source — see dedupe.ts. Direct

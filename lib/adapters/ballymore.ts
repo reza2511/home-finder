@@ -39,6 +39,7 @@
 import * as cheerio from "cheerio";
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const BASE_URL = "https://www.ballymoregroup.com";
@@ -311,7 +312,10 @@ export const ballymoreAdapter: SourceAdapter = {
           // would misrepresent what the price actually is. Left null, same
           // as every other tenure signal on this site (not published).
           tenure: null,
-          isNewBuild: true,
+          // Checked against the development's own page body text (real
+          // signal, not assumed) — defaults true regardless since Ballymore
+          // is a new-build-only developer, same as every source here.
+          isNewBuild: detectIsNewBuild(`${card.name} ${bodyText}`).isNewBuild,
           postcode,
           area: card.location,
         });

@@ -42,6 +42,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { discoverCandidateUrls } from "./urlDiscovery";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure, isExclusivelySharedOwnershipProvider } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -251,6 +252,12 @@ export interface RawExtractedItem {
   postcode: string | null;
   image: string | null;
   tenure: TenureValue | null;
+  /** The fullest real text available for this item (a card's whole text, a
+   * structured field's description, etc.) — used for real, text-grounded
+   * new-build detection (see newBuildDetection.ts) rather than a blanket
+   * assumption. Null when a strategy only ever produces a bare name (still
+   * checked against that name at finalize time, just less to go on). */
+  rawText: string | null;
 }
 
 function finalizeListings(raw: RawExtractedItem[], developer: DeveloperEntry): AdapterListing[] {
@@ -297,7 +304,7 @@ function finalizeListings(raw: RawExtractedItem[], developer: DeveloperEntry): A
       bedrooms: item.bedrooms,
       bedroomType: null, // not attempted generically — too source-specific to infer reliably
       tenure: forceSharedOwnership ? "shared_ownership" : item.tenure,
-      isNewBuild: true,
+      isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
       postcode: item.postcode ?? "",
       area: "",
     });
@@ -376,7 +383,10 @@ function mapJsonLdNode(node: Record<string, unknown>, baseUrl: string): RawExtra
 
   if (!name || !url || priceValue == null) return null;
 
-  return { name, url, priceValue, priceText: null, bedrooms, postcode, image, tenure: null };
+  const description = firstString(node.description);
+  const rawText = description ? `${name} ${description}` : name;
+
+  return { name, url, priceValue, priceText: null, bedrooms, postcode, image, tenure: null, rawText };
 }
 
 function extractJsonLd(html: string, baseUrl: string): RawExtractedItem[] {
@@ -416,6 +426,7 @@ const URL_KEYS = ["url", "href", "link", "detailUrl", "propertyUrl"];
 const IMAGE_KEYS = ["image", "img", "imageUrl", "photo", "thumbnail", "mainImage", "heroImage"];
 const POSTCODE_KEYS = ["postcode", "postCode", "zip", "zipCode", "postalCode"];
 const TENURE_KEYS = ["tenure", "Tenure"];
+const DESCRIPTION_KEYS = ["description", "summary", "shortDescription", "excerpt", "intro"];
 
 function pickKey(obj: Record<string, unknown>, keys: string[] | Set<string>): unknown {
   for (const k of Object.keys(obj)) {
@@ -479,10 +490,11 @@ function mapEmbeddedJsonObject(obj: Record<string, unknown>, baseUrl: string): R
   const imageRaw = firstString(pickKey(obj, IMAGE_KEYS));
   const image = imageRaw ? absoluteUrl(imageRaw, baseUrl) : null;
   const tenure = detectTenure(firstString(pickKey(obj, TENURE_KEYS)));
+  const description = firstString(pickKey(obj, DESCRIPTION_KEYS));
 
   if (!name || !url || priceValue == null) return null;
 
-  return { name, url, priceValue, priceText: null, bedrooms, postcode, image, tenure };
+  return { name, url, priceValue, priceText: null, bedrooms, postcode, image, tenure, rawText: description ? `${name} ${description}` : name };
 }
 
 function extractEmbeddedJson(html: string, baseUrl: string): RawExtractedItem[] {
@@ -617,6 +629,7 @@ function extractHtmlHeuristic(html: string, baseUrl: string): RawExtractedItem[]
       // must win over a "leasehold" mention elsewhere in the same card
       // (see detectTenure's doc comment).
       tenure: detectTenure(text),
+      rawText: text,
     });
   }
   return items;
@@ -718,6 +731,7 @@ function validateAndNormalizeAiListings(
       postcode: firstString(entry.postcode),
       image: imageUrlRaw ? absoluteUrl(imageUrlRaw, baseUrl) : null,
       tenure: detectTenure(firstString(entry.tenure)),
+      rawText: name,
     });
   }
 

@@ -83,6 +83,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { extractWithAi, type RawExtractedItem } from "./autoAdapter";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL =
@@ -262,6 +263,7 @@ function extractFromRenderedCards(html: string): RawExtractedItem[] {
       postcode: postcode || null,
       image: imgSrc ? new URL(imgSrc, BASE_URL).toString() : null,
       tenure: detectTenure(`${name} ${address} ${priceText}`),
+      rawText: `${name} ${address} ${priceText}`,
     });
   });
 
@@ -464,7 +466,7 @@ export const berkeleyAdapter: SourceAdapter = {
                 details.shortDescription ?? ""
               }`
             ),
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(`${details.name ?? ""} ${details.shortDescription ?? ""}`).isNewBuild,
             postcode,
             area,
           });
@@ -493,7 +495,7 @@ export const berkeleyAdapter: SourceAdapter = {
             bedrooms: item.bedrooms,
             bedroomType: null,
             tenure: item.tenure,
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
             postcode: item.postcode ?? "",
             area: "",
           }));
@@ -524,7 +526,7 @@ export const berkeleyAdapter: SourceAdapter = {
             bedrooms: item.bedrooms,
             bedroomType: null,
             tenure: item.tenure,
-            isNewBuild: true,
+            isNewBuild: detectIsNewBuild(item.rawText).isNewBuild,
             postcode: item.postcode ?? "",
             area: "",
           }));

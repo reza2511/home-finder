@@ -36,6 +36,7 @@
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter, TenureValue } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 
 const BASE_URL = "https://www.taylorwimpey.co.uk";
 const LISTINGS_URL = `${BASE_URL}/new-homes/london`;
@@ -86,6 +87,7 @@ interface ParsedPlot {
   bedrooms: number;
   price: number;
   tenure: TenureValue | null;
+  isNewBuild: boolean;
 }
 
 function parseBedrooms(raw: string): number | null {
@@ -117,6 +119,7 @@ function parsePlotsForDevelopment(chunk: string): ParsedPlot[] {
       // Full matched card text — the "plot-card-price--sharedownership"
       // class and its "X% shared ownership of £Y" text both sit inside it.
       tenure: detectTenure(match[0]),
+      isNewBuild: detectIsNewBuild(match[0]).isNewBuild,
     });
   }
   return plots;
@@ -182,7 +185,7 @@ export const taylorWimpeyLondonAdapter: SourceAdapter = {
           bedrooms: plot.bedrooms,
           bedroomType: null, // not published per room
           tenure: plot.tenure,
-          isNewBuild: true,
+          isNewBuild: plot.isNewBuild,
           postcode: "", // not published on this page — never guessed
           area,
         });

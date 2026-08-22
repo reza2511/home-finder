@@ -53,6 +53,7 @@ import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } fro
 import { isBotBlockSignal } from "./blockDetection";
 import { postcodeAreaIsLondon, UK_OUTWARD_CODE_RE } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 import { getSharedBrowser } from "./browser";
 
 const TARGET_URL = "https://www.benhams.com/new-homes/";
@@ -250,7 +251,10 @@ export const benhamsAdapter: SourceAdapter = {
           bedrooms: singleBedroomCount(card.description),
           bedroomType: null, // not published per room
           tenure: detectTenure(card.description),
-          isNewBuild: true,
+          // "New homes" aggregator by its own stated scope (see file
+          // header) — detectIsNewBuild still genuinely checks the card's
+          // own name + description for a resale signal first.
+          isNewBuild: detectIsNewBuild(`${name} ${card.description}`).isNewBuild,
           postcode,
           area,
         });

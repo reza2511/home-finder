@@ -1042,6 +1042,11 @@ button {
   color: var(--color-text-muted);
 }
 
+.status-table__removed {
+  color: var(--color-stale-text);
+  font-weight: 600;
+}
+
 .status-table__error {
   color: var(--color-danger-text);
   display: -webkit-box;

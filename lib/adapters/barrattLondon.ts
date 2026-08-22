@@ -36,6 +36,7 @@
  */
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
+import { detectIsNewBuild } from "./newBuildDetection";
 
 const BASE_URL = "https://www.barratthomes.co.uk";
 const DEVPLOTS_API_URL = `${BASE_URL}/api/search/devplots?brandCodes=bln`;
@@ -114,6 +115,7 @@ interface ParsedPlot {
   bedrooms: number;
   bedroomLabel: string;
   price: number;
+  isNewBuild: boolean;
 }
 
 function parsePlots(html: string): ParsedPlot[] {
@@ -139,6 +141,7 @@ function parsePlots(html: string): ParsedPlot[] {
       bedrooms,
       bedroomLabel,
       price,
+      isNewBuild: detectIsNewBuild(featuresBlock.replace(/<[^>]+>/g, " ")).isNewBuild,
     });
   }
   return plots;
@@ -218,7 +221,7 @@ export const barrattLondonAdapter: SourceAdapter = {
           // here — see file header) — no per-plot signal to key off, so
           // never guessed. Left null, same as every other tenure signal.
           tenure: null,
-          isNewBuild: true,
+          isNewBuild: plot.isNewBuild,
           postcode,
           area: dev.town ?? "",
         });
