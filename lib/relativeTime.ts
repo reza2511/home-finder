@@ -1,3 +1,18 @@
+/** Absolute local date/time, e.g. "22 Aug 2026, 08:15" — used for the
+ * refresh-history buttons, where a fixed point in time (not "3h ago") is
+ * what actually distinguishes one snapshot from another. */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export function formatRelativeTime(iso: string | null): string {
   if (!iso) return "Never";
 

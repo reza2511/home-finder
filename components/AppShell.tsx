@@ -5,14 +5,22 @@ import Header from "./Header";
 import StatusMonitorModal from "./StatusMonitorModal";
 import FilterPanel from "./FilterPanel";
 import DeveloperFilter, { type DeveloperOption } from "./DeveloperFilter";
+import RefreshHistory from "./RefreshHistory";
 import ListingsGrid from "./ListingsGrid";
 import { DEFAULT_FILTERS, filterListings, type ListingFilters } from "@/lib/filterListings";
+import { formatDateTime } from "@/lib/relativeTime";
+import type { HistorySnapshotDetail } from "@/lib/historyClient";
 import type { Listing } from "@/lib/types";
 
 export default function AppShell() {
   const [isStatusOpen, setStatusOpen] = useState(false);
   const [listings, setListings] = useState<Listing[] | null>(null);
   const [filters, setFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
+  // null = viewing live listings (the normal case). Set by clicking a
+  // Refresh History button — everything below (developer options, counts,
+  // filtering, the grid) reads from `activeListings`, so a recalled
+  // snapshot flows through the exact same pipeline live data does.
+  const [historySnapshot, setHistorySnapshot] = useState<HistorySnapshotDetail | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,6 +36,8 @@ export default function AppShell() {
       cancelled = true;
     };
   }, []);
+
+  const activeListings = historySnapshot ? historySnapshot.listings : listings;
 
   // The developer filter's id→name list and per-developer counts are BOTH
   // derived straight from the currently-loaded listings — never from a
@@ -47,7 +57,7 @@ export default function AppShell() {
   const { developerOptions, counts } = useMemo(() => {
     const nameById = new Map<string, string>();
     const countById: Record<string, number> = {};
-    for (const listing of listings ?? []) {
+    for (const listing of activeListings ?? []) {
       countById[listing.sourceId] = (countById[listing.sourceId] ?? 0) + 1;
       if (!nameById.has(listing.sourceId)) nameById.set(listing.sourceId, listing.sourceName);
     }
@@ -55,11 +65,11 @@ export default function AppShell() {
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
     return { developerOptions: options, counts: countById };
-  }, [listings]);
+  }, [activeListings]);
 
   const filtered = useMemo(
-    () => (listings ? filterListings(listings, filters) : []),
-    [listings, filters]
+    () => (activeListings ? filterListings(activeListings, filters) : []),
+    [activeListings, filters]
   );
 
   return (
@@ -76,22 +86,38 @@ export default function AppShell() {
           <aside className="page-sidebar">
             <DeveloperFilter
               developers={developerOptions}
-              loading={listings === null}
+              loading={activeListings === null}
               counts={counts}
               selected={filters.developers}
               onChange={(next) => setFilters({ ...filters, developers: next })}
             />
+            <RefreshHistory
+              activeSnapshotId={historySnapshot?.id ?? null}
+              onSelect={setHistorySnapshot}
+            />
           </aside>
 
           <div className="page-main">
+            {historySnapshot && (
+              <div className="history-banner">
+                <span>
+                  Viewing a saved snapshot from <strong>{formatDateTime(historySnapshot.runStartedAt)}</strong>
+                  {" "}(captured {formatDateTime(historySnapshot.capturedAt)}) — not live data.
+                </span>
+                <button type="button" className="btn btn--ghost" onClick={() => setHistorySnapshot(null)}>
+                  Return to live listings
+                </button>
+              </div>
+            )}
+
             <FilterPanel
               filters={filters}
               onChange={setFilters}
               resultCount={filtered.length}
-              totalCount={listings?.length ?? 0}
+              totalCount={activeListings?.length ?? 0}
             />
 
-            {listings === null ? (
+            {activeListings === null ? (
               <p className="listings-loading">Loading listings…</p>
             ) : (
               <ListingsGrid listings={filtered} />

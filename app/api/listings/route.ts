@@ -1,111 +1,17 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import type { Listing } from "@/lib/types";
+import { fetchActiveListings } from "@/lib/listingsQuery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface ListingRow {
-  source_id: string;
-  source_type: Listing["sourceType"];
-  external_id: string;
-  title: string;
-  price: string;
-  price_value: number;
-  price_range: string | null;
-  url: string;
-  images: string[] | null;
-  main_image: string | null;
-  bedrooms: number | null;
-  bedroom_type: Listing["bedroomType"];
-  tenure: Listing["tenure"];
-  is_new_build: boolean;
-  postcode: string | null;
-  area: string | null;
-}
-
 // Aggregated feed of currently-active listings across every source, for the
-// main page grid. Not part of the status monitor feature, but gives the app
-// something to show behind it.
-//
-// This used to request an explicit, generous `.range(0, 4999)` in one shot,
-// on the theory that a single request asking for more than the current
-// total would return everything. That's wrong on Supabase specifically:
-// PostgREST enforces its own server-side `db-max-rows` ceiling (1000 by
-// default) that silently caps the response — confirmed live once the
-// dataset actually grew past it (1,244 active listings; the aggregator
-// adapters alone add 700+): the exact same class of bug this endpoint's
-// hardcoded `LIMIT 200` caused against SQLite (see git history), just
-// resurfacing at a different, platform-imposed ceiling instead of a
-// hand-rolled one. A single `.range()` can only ever ask the server for up
-// to whatever that ceiling is; it can't override it. The real fix is to
-// page through in a loop, one request per `PAGE_SIZE`-sized chunk, until a
-// page comes back with fewer rows than requested — that terminates
-// correctly regardless of what the server's own cap is set to, so this
-// endpoint can never again silently drop listings just because the total
-// grew past some number nobody explicitly chose.
-const PAGE_SIZE = 1000;
-const MAX_PAGES = 20; // 20,000 rows — comfortably beyond any realistic total; a real, generous safety net, not a silent cap
-
-async function fetchAllActiveListings(): Promise<{ rows: ListingRow[]; error: string | null }> {
-  const rows: ListingRow[] = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const from = page * PAGE_SIZE;
-    const { data, error } = await supabase
-      .from("listings")
-      .select(
-        "source_id, source_type, external_id, title, price, price_value, price_range, url, images, main_image, bedrooms, bedroom_type, tenure, is_new_build, postcode, area"
-      )
-      .eq("active", true)
-      .order("last_seen_at", { ascending: false })
-      .range(from, from + PAGE_SIZE - 1)
-      .returns<ListingRow[]>();
-    if (error) return { rows, error: error.message };
-
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) break; // short page — this was the last one
-  }
-  return { rows, error: null };
-}
-
-// `listings` and `sync_status` share a source_id column but have no foreign
-// key between them (see supabase/migrations/0001_init.sql), so PostgREST
-// can't embed one in the other via a single `.select()` — two queries plus
-// an in-memory merge, same shape the old SQL LEFT JOIN produced.
+// main page grid. See lib/listingsQuery.ts for the shared query/pagination
+// logic (also used by the refresh-history snapshot capture).
 export async function GET() {
-  const [{ rows, error: listingsErr }, { data: sources, error: statusErr }] = await Promise.all([
-    fetchAllActiveListings(),
-    supabase.from("sync_status").select("source_id, source_name").returns<{ source_id: string; source_name: string }[]>(),
-  ]);
-
-  if (listingsErr) {
-    return NextResponse.json({ error: `Failed to read listings from Supabase: ${listingsErr}` }, { status: 500 });
+  const { listings, error } = await fetchActiveListings(supabase);
+  if (error) {
+    return NextResponse.json({ error }, { status: 500 });
   }
-  if (statusErr) {
-    return NextResponse.json({ error: `Failed to read sync_status from Supabase: ${statusErr.message}` }, { status: 500 });
-  }
-
-  const sourceNameById = new Map((sources ?? []).map((s) => [s.source_id, s.source_name]));
-
-  const listings: Listing[] = rows.map((r) => ({
-    sourceId: r.source_id,
-    sourceName: sourceNameById.get(r.source_id) ?? r.source_id,
-    sourceType: r.source_type,
-    externalId: r.external_id,
-    title: r.title,
-    price: r.price,
-    priceValue: r.price_value,
-    priceRange: r.price_range,
-    url: r.url,
-    images: r.images ?? [],
-    mainImage: r.main_image,
-    bedrooms: r.bedrooms,
-    bedroomType: r.bedroom_type,
-    tenure: r.tenure,
-    isNewBuild: r.is_new_build,
-    postcode: r.postcode ?? "",
-    area: r.area ?? "",
-  }));
-
   return NextResponse.json({ listings });
 }
