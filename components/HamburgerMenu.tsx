@@ -1,0 +1,53 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+// Top-corner navigation menu — currently just links to /compare, but a
+// dedicated menu component (rather than another header button) so future
+// pages have somewhere to go without crowding app-header__actions.
+export default function HamburgerMenu() {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    function onClickOutside(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("mousedown", onClickOutside);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("mousedown", onClickOutside);
+    };
+  }, [open]);
+
+  return (
+    <div className="hamburger-menu" ref={rootRef}>
+      <button
+        type="button"
+        className="hamburger-menu__button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Menu"
+      >
+        ☰
+      </button>
+      {open && (
+        <nav className="hamburger-menu__panel" role="menu">
+          <a href="/" role="menuitem" className="hamburger-menu__item">
+            Home
+          </a>
+          <a href="/compare" role="menuitem" className="hamburger-menu__item">
+            Compare properties
+          </a>
+        </nav>
+      )}
+    </div>
+  );
+}

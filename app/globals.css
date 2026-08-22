@@ -75,10 +75,65 @@ button {
   z-index: 10;
 }
 
+.app-header__left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .app-header__brand {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.hamburger-menu {
+  position: relative;
+}
+
+.hamburger-menu__button {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hamburger-menu__button:hover {
+  background: var(--color-bg);
+}
+
+.hamburger-menu__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  z-index: 20;
+}
+
+.hamburger-menu__item {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.hamburger-menu__item:hover {
+  background: var(--color-bg);
 }
 
 .app-header__logo {
@@ -357,6 +412,12 @@ button {
   cursor: pointer;
 }
 
+/* Same layout as the include checkboxes, just tinted danger-red on check so
+   "hide this tenure" reads as visually distinct from "show only this". */
+.filter-checkboxes--exclude .filter-checkbox input[type="checkbox"] {
+  accent-color: var(--color-danger-dot);
+}
+
 .filter-toggle {
   display: inline-flex;
   align-items: center;
@@ -518,6 +579,67 @@ button {
   font-size: 13px;
   margin: 0;
   padding: 4px 2px;
+}
+
+/* ---------- Refresh history (logged-in only) ---------- */
+
+.refresh-history {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.refresh-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.refresh-history__item {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.refresh-history__item:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+.refresh-history__item--active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+.refresh-history__item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.history-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--color-stale-bg);
+  color: var(--color-stale-text);
+  border: 1px solid var(--color-stale-dot);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
 }
 
 /* ---------- Listing grid & cards ---------- */
@@ -868,4 +990,162 @@ button {
 .status-badge--blocked .status-badge__dot,
 .status-badge--error .status-badge__dot {
   background: var(--color-danger-dot);
+}
+
+/* ---------- Login ---------- */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--color-bg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-card__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-card__heading {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-field__input {
+  width: 100%;
+}
+
+.login-card__submit {
+  justify-content: center;
+  margin-top: 6px;
+}
+
+/* ---------- Compare properties ---------- */
+
+.compare-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.compare-inputs__field {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 13px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  width: 100%;
+}
+
+.compare-inputs__field:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.compare-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.compare-table-wrap {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.compare-table th:first-child,
+.compare-table td:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.compare-table tr:last-child th,
+.compare-table tr:last-child td {
+  border-bottom: none;
+}
+
+.compare-table th:last-child,
+.compare-table td:last-child {
+  border-right: none;
+}
+
+.compare-table__header-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  text-transform: none;
+  letter-spacing: normal;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-table__header-url {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.compare-table__col--failed {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
 }

@@ -16,12 +16,14 @@ const nextConfig = {
     // out of the deployed function, which is what the "The input directory
     // '/var/task/bin' does not exist" error means if it shows up in
     // Vercel's function logs.
-    // Both routes can end up launching a browser: /api/sync always does,
-    // and /api/status's first-ever hit auto-triggers a full sync too (see
-    // ensureInitialSyncHasRun in app/api/status/route.ts).
+    // All three routes can end up launching a browser: /api/sync always
+    // does, /api/status's first-ever hit auto-triggers a full sync too (see
+    // ensureInitialSyncHasRun in app/api/status/route.ts), and /api/compare
+    // renders arbitrary property-listing pages (lib/compareExtract.ts).
     outputFileTracingIncludes: {
       "/api/sync": ["./node_modules/@sparticuz/chromium/bin/**"],
       "/api/status": ["./node_modules/@sparticuz/chromium/bin/**"],
+      "/api/compare": ["./node_modules/@sparticuz/chromium/bin/**"],
     },
   },
 };
