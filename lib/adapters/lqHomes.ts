@@ -48,6 +48,10 @@
  * actually extracted for that development — real data derived from real
  * data, never trusting an unreliable upstream field.
  *
+ * Bathrooms/floor: each plot's own `acf.plot_bathrooms`/`acf.plot_floor`
+ * are real structured integer fields (confirmed live 2026-08) — used
+ * directly, never derived from bedroom count or guessed.
+ *
  * Fallback order if the JSON API's shape ever changes: (a) parse the
  * rendered HTML's own `.c-development-card` cards, (b) AI extraction on the
  * rendered HTML via the same extractWithAi() the generic auto-adapter uses
@@ -110,6 +114,8 @@ interface LqPropertyAcf {
   plot_type?: string;
   plot_tenure?: string;
   plot_bedrooms?: string;
+  plot_bathrooms?: string;
+  plot_floor?: string;
   plot_number?: string;
   building_name?: string;
   plot_featured_image?: { url?: string };
@@ -152,6 +158,18 @@ function parseBedrooms(raw: string | undefined): number | null {
   if (/studio/i.test(raw)) return 0;
   const n = parseInt(raw, 10);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Generic non-negative-integer parser for `acf.plot_bathrooms`/
+ * `plot_floor` — unlike parseBedrooms there's no "studio" text to handle,
+ * but 0 (no bathroom count stated as such never happens, but floor 0 =
+ * ground) is still a valid real value, so an empty/absent string is
+ * distinguished from it explicitly rather than relying on parseInt("")
+ * being falsy. */
+function parseCount(raw: string | undefined): number | null {
+  if (raw == null || raw.trim() === "") return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 // A full UK postcode, or just the outward/district code (e.g. "UB3") when
@@ -231,6 +249,9 @@ function buildListing(dev: LqDevelopment, prop: LqProperty, devArea: { postcode:
       mainImage: image,
       bedrooms: parseBedrooms(acf.plot_bedrooms),
       bedroomType: null, // not published per room
+      // Real structured acf fields, confirmed live — never derived.
+      bathrooms: parseCount(acf.plot_bathrooms),
+      floor: parseCount(acf.plot_floor),
       // L&Q's own `plot_tenure` field says "Leasehold" even on shared-
       // ownership plots (confirmed live) — the structural leasehold detail
       // isn't the tenure category that matters here, so `plot_type`'s

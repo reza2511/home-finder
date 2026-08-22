@@ -10,6 +10,48 @@ const TENURE_LABELS: Record<TenureValue, string> = {
   shared_ownership: "Shared ownership",
 };
 
+/** Compact icon + number row for a card's structured attributes — bedrooms,
+ * bathrooms, parking, floor. Each is shown only when the listing actually
+ * has a real value for it (`bedrooms` is always present-or-null;
+ * bathrooms/parking/floor may also be absent entirely on older rows) — a
+ * missing one is left out of the row completely, never shown as 0 or
+ * guessed. Renders nothing at all when not one of the four is known. */
+function ListingAttrs({ listing }: { listing: Listing }) {
+  const attrs: { key: string; icon: string; label: string; value: string }[] = [];
+
+  if (listing.bedrooms !== null) {
+    attrs.push({
+      key: "bed",
+      icon: "🛏",
+      label: "Bedrooms",
+      value: listing.bedrooms === 0 ? "Studio" : String(listing.bedrooms),
+    });
+  }
+  if (listing.bathrooms != null) {
+    attrs.push({ key: "bath", icon: "🛁", label: "Bathrooms", value: String(listing.bathrooms) });
+  }
+  if (listing.parking != null) {
+    attrs.push({ key: "parking", icon: "🚗", label: "Parking", value: String(listing.parking) });
+  }
+  if (listing.floor != null) {
+    // "G" for ground floor is a standard, unambiguous UK convention — not a
+    // guess, same spirit as bedrooms:0 already rendering as "Studio" above.
+    attrs.push({ key: "floor", icon: "🏢", label: "Floor", value: listing.floor === 0 ? "G" : String(listing.floor) });
+  }
+
+  if (attrs.length === 0) return null;
+
+  return (
+    <div className="listing-card__attrs">
+      {attrs.map((a) => (
+        <span key={a.key} className="listing-card__attr" title={a.label}>
+          <span aria-hidden="true">{a.icon}</span> {a.value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 interface Props {
   listings: Listing[];
   /** Set of `sourceId::externalId` keys currently favourited, or null/
@@ -59,14 +101,15 @@ export default function ListingsGrid({
           <div className="listing-card__body">
             <div className="listing-card__price">{l.price}</div>
             <div className="listing-card__title">{l.title}</div>
+            <ListingAttrs listing={l} />
             <div className="listing-card__meta">
-              <span>
-                {l.bedrooms === null ? "Bedrooms not stated" : l.bedrooms === 0 ? "Studio" : `${l.bedrooms} bed`}
-              </span>
+              {/* Bedroom count itself now lives in the icon attrs row above
+                  — this line is left for the details that row has no room
+                  for: single/double per-room type and tenure. */}
               {l.bedroomType && (
-                <span>· {l.bedroomType === "single" ? "Single" : "Double"} bed</span>
+                <span>{l.bedroomType === "single" ? "Single" : "Double"} bed ·</span>
               )}
-              <span>· {l.tenure ? TENURE_LABELS[l.tenure] : "Tenure not stated"}</span>
+              <span>{l.tenure ? TENURE_LABELS[l.tenure] : "Tenure not stated"}</span>
             </div>
             <div className="listing-card__footer">
               <span className="listing-card__area">

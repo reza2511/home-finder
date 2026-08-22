@@ -11,6 +11,11 @@ import { redrowAdapter } from "./redrow";
 import { oneNewHomesAdapter } from "./oneNewHomes";
 import { benhamsAdapter } from "./benhams";
 import { countrysideAdapter } from "./countryside";
+import { winkworthAdapter } from "./winkworth";
+import { hamptonsAdapter } from "./hamptons";
+import { knightFrankAdapter } from "./knightFrank";
+import { renownedHomesAdapter } from "./renownedHomes";
+import { benhamsLondonAdapter } from "./benhamsLondon";
 import { createAutoAdapter } from "./autoAdapter";
 import { ALLOWED_DEVELOPERS, ALLOWED_DEVELOPER_NAMES } from "../developers";
 
@@ -29,6 +34,11 @@ const REAL_ADAPTERS: Record<string, SourceAdapter> = {
   [oneNewHomesAdapter.id]: oneNewHomesAdapter,
   [benhamsAdapter.id]: benhamsAdapter,
   [countrysideAdapter.id]: countrysideAdapter,
+  [winkworthAdapter.id]: winkworthAdapter,
+  [hamptonsAdapter.id]: hamptonsAdapter,
+  [knightFrankAdapter.id]: knightFrankAdapter,
+  [renownedHomesAdapter.id]: renownedHomesAdapter,
+  [benhamsLondonAdapter.id]: benhamsLondonAdapter,
 };
 
 // One adapter per developer in london-developers.json — the file is

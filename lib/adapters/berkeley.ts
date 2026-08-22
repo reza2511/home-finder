@@ -49,13 +49,15 @@
  * this is what the task/data actually supports: Berkeley's own `priceRange`
  * string is the real, developer-published range for the whole development,
  * per instruction stored as `price` = its starting (floor) figure and the
- * full string kept in `priceRange`. `bedrooms` is filled in from whichever
- * of that development's real individual properties (#3) has the lowest
- * parseable price — i.e. the actual home the floor price refers to
- * (confirmed live: that property's own price always matches the
- * development's published floor price exactly) — left null if that can't be
- * determined honestly (e.g. the cheapest property has no bedroom count, or
- * no properties were returned at all).
+ * full string kept in `priceRange`. `bedrooms` (and, when that same
+ * property's own real `propertyfloor` field states one, `floor` — e.g. "9",
+ * blank on houses, confirmed live) are filled in from whichever of that
+ * development's real individual properties (#3) has the lowest parseable
+ * price — i.e. the actual home the floor price refers to (confirmed live:
+ * that property's own price always matches the development's published
+ * floor price exactly) — left null if that can't be determined honestly
+ * (e.g. the cheapest property has no bedroom count, or no properties were
+ * returned at all).
  *
  * Tenure is never stated anywhere in this JSON (checked directly: no field
  * on either endpoint, and none of the 29 London developments' name/address/
@@ -144,6 +146,7 @@ interface BerkeleyPropertyItem {
   fields?: {
     propertyprice?: string;
     propertynoofbedrooms?: string;
+    propertyfloor?: string;
   };
 }
 
@@ -213,19 +216,31 @@ function parsePropertyPrice(raw: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** The real bedroom count of whichever of a development's actual properties
- * has the lowest real price — i.e. the specific home the development's own
- * published floor price refers to. Never guessed: null if no property has
- * both a parseable price and a bedroom count. */
-function bedroomsForStartingPrice(items: BerkeleyPropertyItem[]): number | null {
-  let best: { price: number; bedrooms: number } | null = null;
+/** Real per-property floor number (e.g. "9", "12") — blank on houses and on
+ * some flats (confirmed live), never guessed when absent. Unlike bedrooms,
+ * 0 is a valid floor (ground), so an empty string is distinguished from it
+ * explicitly rather than relying on parseInt("") being falsy. */
+function parseFloor(raw: string | undefined): number | null {
+  if (raw == null || raw.trim() === "") return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** The real bedroom count AND floor of whichever of a development's actual
+ * properties has the lowest real price — i.e. the specific home the
+ * development's own published floor price refers to. Both null when no
+ * property has both a parseable price and that field. */
+function bestPropertyForStartingPrice(
+  items: BerkeleyPropertyItem[]
+): { bedrooms: number | null; floor: number | null } {
+  let best: { price: number; bedrooms: number | null; floor: number | null } | null = null;
   for (const item of items) {
     const price = parsePropertyPrice(item.fields?.propertyprice);
     const bedrooms = parseBedrooms(item.fields?.propertynoofbedrooms);
     if (price == null || bedrooms == null) continue;
-    if (!best || price < best.price) best = { price, bedrooms };
+    if (!best || price < best.price) best = { price, bedrooms, floor: parseFloor(item.fields?.propertyfloor) };
   }
-  return best?.bedrooms ?? null;
+  return { bedrooms: best?.bedrooms ?? null, floor: best?.floor ?? null };
 }
 
 // ---------- fallback strategies (only reached if the JSON API is empty) ----------
@@ -426,6 +441,7 @@ export const berkeleyAdapter: SourceAdapter = {
           }
 
           let bedrooms: number | null = null;
+          let floor: number | null = null;
           if (item.developmentNoOfProperties > 0) {
             try {
               const propRes = await page.request.get(
@@ -434,7 +450,9 @@ export const berkeleyAdapter: SourceAdapter = {
               );
               requestLog.push({ method: "GET (direct)", url: propRes.url() });
               const propJson = (await propRes.json()) as BerkeleyPropertiesResponse;
-              bedrooms = bedroomsForStartingPrice(propJson.data?.items ?? []);
+              const best = bestPropertyForStartingPrice(propJson.data?.items ?? []);
+              bedrooms = best.bedrooms;
+              floor = best.floor;
             } catch (err) {
               console.warn(
                 `[berkeley] properties fetch failed for development ${item.developmentId}: ${
@@ -461,6 +479,9 @@ export const berkeleyAdapter: SourceAdapter = {
             mainImage: details.previewImage?.path ?? null,
             bedrooms,
             bedroomType: null, // not published per room
+            // Same cheapest-property pick bedrooms comes from — its real
+            // `propertyfloor` field (blank on houses, confirmed live).
+            floor,
             tenure: detectTenure(
               `${details.name ?? ""} ${details.address ?? ""} ${details.propertyTypes ?? ""} ${
                 details.shortDescription ?? ""

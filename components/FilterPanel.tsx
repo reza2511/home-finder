@@ -173,19 +173,6 @@ export default function FilterPanel({ filters, onChange, resultCount, totalCount
           </div>
         </div>
 
-        <div className="filter-group">
-          <span className="filter-group__label">New build</span>
-          <label className="filter-toggle">
-            <input
-              type="checkbox"
-              checked={filters.newBuildOnly}
-              onChange={(e) => patch({ newBuildOnly: e.target.checked })}
-            />
-            <span className="filter-toggle__track" aria-hidden />
-            New build only
-          </label>
-        </div>
-
         <button
           type="button"
           className="btn btn--ghost filter-clear"

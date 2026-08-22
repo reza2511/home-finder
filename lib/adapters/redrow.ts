@@ -46,6 +46,10 @@
  * development page (checked directly, same as Barratt) — left `null`
  * rather than guessed. bedroomType (single/double per room) isn't
  * published either — also left `null`.
+ *
+ * Floor: same real "Floor N" `<li>` Barratt's identical card markup
+ * carries (see above) — parsed the same way, `null` when a plot's card
+ * doesn't state one.
  */
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
@@ -101,6 +105,7 @@ interface ParsedPlot {
   image: string;
   bedrooms: number;
   bedroomLabel: string;
+  floor: number | null;
   price: number;
   isNewBuild: boolean;
 }
@@ -119,6 +124,9 @@ function parsePlots(html: string): ParsedPlot[] {
     const bedroomLabel = bedMatch[1].replace(/\s+/g, " ").trim();
     const bedrooms = /studio/i.test(bedroomLabel) ? 0 : parseInt(bedroomLabel, 10) || 0;
     const price = parseInt(priceMatch[1].replace(/,/g, ""), 10);
+    // Same "Floor N" li Barratt's identical card markup carries (see file
+    // header) — only some plots state it, never guessed when absent.
+    const floorMatch = featuresBlock.match(/\bFloor\s*(\d+)\b/i);
 
     plots.push({
       url,
@@ -126,6 +134,7 @@ function parsePlots(html: string): ParsedPlot[] {
       image: absoluteUrl(bestImage),
       bedrooms,
       bedroomLabel,
+      floor: floorMatch ? parseInt(floorMatch[1], 10) : null,
       price,
       isNewBuild: detectIsNewBuild(featuresBlock.replace(/<[^>]+>/g, " ")).isNewBuild,
     });
@@ -248,6 +257,7 @@ export const redrowAdapter: SourceAdapter = {
             mainImage: images[0] ?? null,
             bedrooms: plot.bedrooms,
             bedroomType: null, // not published per room
+            floor: plot.floor,
             tenure: null, // not published anywhere on this site
             isNewBuild: plot.isNewBuild,
             postcode,

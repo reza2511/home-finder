@@ -1,8 +1,22 @@
 /**
- * Cross-source dedup for aggregator adapters (1newhomes, Benhams) — a
- * direct developer's own site always takes priority; an aggregator listing
- * is only kept when it isn't already covered by a direct-developer listing
- * currently in Supabase.
+ * Cross-source dedup for every second-phase (non-direct-developer) adapter
+ * — aggregators (1newhomes, Benhams) and general estate agents (Winkworth,
+ * Hamptons, Knight Frank, Renowned Homes, Benhams London) alike. A direct
+ * developer's own site always takes priority; a second-phase source's
+ * listing is only kept when it isn't already covered by ANY other
+ * currently-active listing in Supabase — a direct developer's, or another
+ * second-phase source's (2026-08: extended from "direct developers only" to
+ * this, per explicit instruction — the estate-agent sources overlap with
+ * each other at least as much as with direct developers, e.g. the two
+ * Benhams pages/new-homes and /london/ cover much of the same stock).
+ *
+ * This only works correctly because runAllAdapters() (syncEngine.ts) runs
+ * every second-phase source SEQUENTIALLY, not in parallel — each one's
+ * dedupe query needs to see every earlier second-phase source's
+ * already-written rows from the SAME sync run, not just direct developers'.
+ * Among second-phase sources, whichever one runs (and is therefore stored)
+ * first wins a duplicate — driven by registration order in
+ * london-developers.json / lib/adapters/index.ts.
  *
  * "Match on development name + postcode + price, allowing small
  * differences" is implemented as ALL THREE of:
@@ -30,7 +44,7 @@
 import { requireSupabaseAdmin } from "../db";
 import type { AdapterListing } from "./types";
 
-interface DirectListingRow {
+interface ActiveListingRow {
   title: string;
   postcode: string | null;
   price_value: number;
@@ -91,12 +105,18 @@ export interface DedupeResult {
   droppedTitles: string[];
 }
 
-/** Filters `incoming` (one aggregator's freshly-extracted listings) against
- * every currently-active direct-developer listing in Supabase, dropping any
- * that match on name + postcode + price. Reads via the service_role client
- * since this runs as part of the sync job, alongside the write it's about
- * to make. */
-export async function dedupeAgainstDirectListings(incoming: AdapterListing[]): Promise<DedupeResult> {
+/** Filters `incoming` (one second-phase source's freshly-extracted
+ * listings) against every OTHER currently-active listing in Supabase —
+ * direct developers' and every other second-phase source's alike (see file
+ * header) — dropping any that match on name + postcode + price.
+ * `currentSourceId` excludes that source's own previously-active rows from
+ * the comparison (a source should never dedupe against its own prior run).
+ * Reads via the service_role client since this runs as part of the sync
+ * job, alongside the write it's about to make. */
+export async function dedupeAgainstActiveListings(
+  incoming: AdapterListing[],
+  currentSourceId: string
+): Promise<DedupeResult> {
   if (incoming.length === 0) return { kept: [], droppedCount: 0, droppedTitles: [] };
 
   const admin = requireSupabaseAdmin();
@@ -104,17 +124,17 @@ export async function dedupeAgainstDirectListings(incoming: AdapterListing[]): P
     .from("listings")
     .select("title, postcode, price_value")
     .eq("active", true)
-    .eq("source_type", "developer")
-    .returns<DirectListingRow[]>();
+    .neq("source_id", currentSourceId)
+    .returns<ActiveListingRow[]>();
   if (error) {
-    throw new Error(`dedupeAgainstDirectListings: failed to read direct-developer listings: ${error.message}`);
+    throw new Error(`dedupeAgainstActiveListings(${currentSourceId}): failed to read active listings: ${error.message}`);
   }
-  const directListings = data ?? [];
+  const otherListings = data ?? [];
 
   const kept: AdapterListing[] = [];
   const droppedTitles: string[] = [];
   for (const listing of incoming) {
-    const duplicate = directListings.some(
+    const duplicate = otherListings.some(
       (d) =>
         postcodesMatch(d.postcode, listing.postcode) &&
         namesMatch(d.title, listing.title) &&

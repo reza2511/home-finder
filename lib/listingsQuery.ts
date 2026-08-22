@@ -14,6 +14,9 @@ interface ListingRow {
   main_image: string | null;
   bedrooms: number | null;
   bedroom_type: Listing["bedroomType"];
+  bathrooms: number | null;
+  parking: number | null;
+  floor: number | null;
   tenure: Listing["tenure"];
   is_new_build: boolean;
   postcode: string | null;
@@ -48,7 +51,7 @@ async function fetchAllActiveListingRows(
     const { data, error } = await client
       .from("listings")
       .select(
-        "source_id, source_type, external_id, title, price, price_value, price_range, url, images, main_image, bedrooms, bedroom_type, tenure, is_new_build, postcode, area"
+        "source_id, source_type, external_id, title, price, price_value, price_range, url, images, main_image, bedrooms, bedroom_type, bathrooms, parking, floor, tenure, is_new_build, postcode, area"
       )
       .eq("active", true)
       .order("last_seen_at", { ascending: false })
@@ -106,6 +109,9 @@ export async function fetchActiveListings(
     mainImage: r.main_image,
     bedrooms: r.bedrooms,
     bedroomType: r.bedroom_type,
+    bathrooms: r.bathrooms,
+    parking: r.parking,
+    floor: r.floor,
     tenure: r.tenure,
     isNewBuild: r.is_new_build,
     postcode: r.postcode ?? "",

@@ -418,54 +418,6 @@ button {
   accent-color: var(--color-danger-dot);
 }
 
-.filter-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  user-select: none;
-  padding-bottom: 8px;
-}
-
-.filter-toggle input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.filter-toggle__track {
-  width: 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--color-border);
-  position: relative;
-  flex-shrink: 0;
-  transition: background-color 0.15s ease;
-}
-
-.filter-toggle__track::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.15s ease;
-}
-
-.filter-toggle input:checked + .filter-toggle__track {
-  background: var(--color-primary);
-}
-
-.filter-toggle input:checked + .filter-toggle__track::after {
-  transform: translateX(14px);
-}
-
 .filter-clear {
   margin-left: auto;
 }
@@ -579,6 +531,31 @@ button {
   font-size: 13px;
   margin: 0;
   padding: 4px 2px;
+}
+
+/* ---------- Area quick filters (sidebar, reuses .dev-filter's card/count
+   styles above and .filter-pill's active-state styling from the filter
+   panel) ---------- */
+
+.area-quick-filters__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.area-quick-filters__pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.area-quick-filters__pill.filter-pill--active .dev-filter__count {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--color-primary-contrast);
 }
 
 /* ---------- Refresh history (logged-in only) ---------- */
@@ -828,6 +805,22 @@ button {
   font-size: 14px;
   color: var(--color-text);
   margin-bottom: 8px;
+}
+
+.listing-card__attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.listing-card__attr {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
 }
 
 .listing-card__meta {

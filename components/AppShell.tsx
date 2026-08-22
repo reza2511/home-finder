@@ -7,7 +7,9 @@ import FilterPanel from "./FilterPanel";
 import DeveloperFilter, { type DeveloperOption } from "./DeveloperFilter";
 import RefreshHistory from "./RefreshHistory";
 import ListingsGrid from "./ListingsGrid";
+import AreaQuickFilters from "./AreaQuickFilters";
 import { DEFAULT_FILTERS, filterListings, type ListingFilters } from "@/lib/filterListings";
+import { AREA_QUICK_FILTERS, listingMatchesAreaQuickFilter } from "@/lib/areaQuickFilters";
 import { formatDateTime } from "@/lib/relativeTime";
 import { fetchSession } from "@/lib/authClient";
 import { addFavourite, favouriteKey, fetchFavouriteKeys, removeFavourite } from "@/lib/favouritesClient";
@@ -123,6 +125,22 @@ export default function AppShell() {
     [activeListings, filters]
   );
 
+  // Per-button match count, from the full currently-loaded listings —
+  // independent of every other active filter, same convention as
+  // DeveloperFilter's own counts above (so a button's number always
+  // answers "how many listings are in this area at all", not "... given
+  // what else is ticked right now").
+  const areaQuickFilterCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const f of AREA_QUICK_FILTERS) counts[f.id] = 0;
+    for (const listing of activeListings ?? []) {
+      for (const f of AREA_QUICK_FILTERS) {
+        if (listingMatchesAreaQuickFilter(listing, f)) counts[f.id]++;
+      }
+    }
+    return counts;
+  }, [activeListings]);
+
   return (
     <>
       <Header onOpenStatus={() => setStatusOpen(true)} />
@@ -174,6 +192,14 @@ export default function AppShell() {
               <ListingsGrid listings={filtered} favouriteKeys={favouriteKeys} onToggleFavourite={handleToggleFavourite} />
             )}
           </div>
+
+          <aside className="page-sidebar page-sidebar--right">
+            <AreaQuickFilters
+              selected={filters.areaQuickFilter}
+              onChange={(next) => setFilters({ ...filters, areaQuickFilter: next })}
+              counts={areaQuickFilterCounts}
+            />
+          </aside>
         </div>
       </main>
       {isStatusOpen && <StatusMonitorModal onClose={() => setStatusOpen(false)} />}

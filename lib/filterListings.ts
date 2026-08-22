@@ -1,4 +1,5 @@
 import type { Listing, TenureValue } from "./types";
+import { AREA_QUICK_FILTERS, listingMatchesAreaQuickFilter } from "./areaQuickFilters";
 
 export type BedroomFilterValue = "any" | "0" | "1" | "2" | "3" | "4+";
 export type BedroomTypeFilterValue = "any" | "single" | "double";
@@ -17,7 +18,6 @@ export interface ListingFilters {
    * When a value appears in both `tenure` and `excludeTenure` at once,
    * exclude wins (checked in filterListings after the include check). */
   excludeTenure: TenureValue[];
-  newBuildOnly: boolean;
   /** Matched against postcode and area, case-insensitively. */
   search: string;
   /** Selected developer (source) ids to show, checkbox-list semantics:
@@ -27,6 +27,12 @@ export interface ListingFilters {
    *  shown). Unlike `tenure`, empty can't mean "no restriction" here since
    *  the UI needs a real "select none" state distinct from the default. */
   developers: string[] | null;
+  /** Selected "area quick filter" button id (see lib/areaQuickFilters.ts),
+   * or null for none active. Single-select — clicking the active one again
+   * clears it back to null, same as every other filter clearing to its own
+   * "off" state, and it composes with everything else here (AND), not a
+   * replacement for the rest. */
+  areaQuickFilter: string | null;
 }
 
 export const DEFAULT_FILTERS: ListingFilters = {
@@ -36,9 +42,9 @@ export const DEFAULT_FILTERS: ListingFilters = {
   maxPrice: null,
   tenure: [],
   excludeTenure: [],
-  newBuildOnly: false,
   search: "",
   developers: null,
+  areaQuickFilter: null,
 };
 
 export function filterListings(listings: Listing[], filters: ListingFilters): Listing[] {
@@ -76,10 +82,17 @@ export function filterListings(listings: Listing[], filters: ListingFilters): Li
       return false;
     }
 
-    if (filters.newBuildOnly && !listing.isNewBuild) return false;
-
     if (filters.developers !== null && !filters.developers.includes(listing.sourceId)) {
       return false;
+    }
+
+    if (filters.areaQuickFilter) {
+      const active = AREA_QUICK_FILTERS.find((f) => f.id === filters.areaQuickFilter);
+      // An unrecognized id (shouldn't happen — only ever set from the
+      // button list itself) is treated as no restriction, never as
+      // "match nothing", so a stale/renamed id can't silently blank the
+      // whole grid.
+      if (active && !listingMatchesAreaQuickFilter(listing, active)) return false;
     }
 
     if (search) {
@@ -99,8 +112,8 @@ export function isDefaultFilters(filters: ListingFilters): boolean {
     filters.maxPrice == null &&
     filters.tenure.length === 0 &&
     filters.excludeTenure.length === 0 &&
-    !filters.newBuildOnly &&
     filters.search.trim() === "" &&
-    filters.developers === null
+    filters.developers === null &&
+    filters.areaQuickFilter === null
   );
 }

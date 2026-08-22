@@ -1,6 +1,6 @@
 import { pruneUnknownSources, requireSupabaseAdmin } from "./db";
 import { adapters } from "./adapters";
-import { isAggregatorSource } from "./developers";
+import { isAggregatorSource, isEstateAgentSource, isSecondPhaseSource } from "./developers";
 import {
   AdapterAutoExtractionError,
   AdapterHttpError,
@@ -10,9 +10,9 @@ import {
 import { isBotBlockSignal } from "./adapters/blockDetection";
 import { applySharedOwnershipOverride } from "./adapters/tenureDetection";
 import { applyNewBuildOverride } from "./adapters/newBuildDetection";
-import { dedupeAgainstDirectListings } from "./adapters/dedupe";
+import { dedupeAgainstActiveListings } from "./adapters/dedupe";
 import { upsertListingsForSource } from "./listingsStore";
-import type { StoredSourceStatus } from "./types";
+import type { SourceType, StoredSourceStatus } from "./types";
 
 // Some adapters make several real, sequential HTTP requests (Barratt London:
 // one per development page) or spin up a Playwright render (the generic
@@ -136,33 +136,40 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
       .map((listing) => applySharedOwnershipOverride(listing, adapter.id))
       .map((listing) => applyNewBuildOverride(listing));
 
-    // Aggregator sources (1newhomes, Benhams) only ever keep listings not
-    // already covered by a direct-developer source — see dedupe.ts. Direct
-    // developer sources skip this entirely (sourceType check is cheap and
-    // dedupeAgainstDirectListings would just be a no-op filter against
-    // itself otherwise). runAllAdapters() below always finishes every
-    // direct-developer adapter before starting any aggregator one, so this
-    // query sees the complete, freshly-synced set of direct listings.
-    const isAggregator = isAggregatorSource(adapter.id);
+    // Aggregator sources (1newhomes, Benhams) and general estate-agent
+    // sources (Winkworth, Hamptons, Knight Frank, Renowned Homes, Benhams
+    // London) only ever keep listings not already covered by another
+    // currently-active listing — a direct developer's, or another
+    // second-phase source's (e.g. the two Benhams pages against each other)
+    // — see dedupe.ts. Direct developer sources skip this entirely (the
+    // check is cheap and dedupeAgainstActiveListings would just be a no-op
+    // filter against itself otherwise). runAllAdapters() below always
+    // finishes every direct-developer adapter before starting any
+    // second-phase one, AND runs second-phase sources sequentially (not in
+    // parallel), so this query always sees the complete, freshly-synced set
+    // of everything that ran before it in this same sync.
+    const isSecondPhase = isSecondPhaseSource(adapter.id);
     let dedupedCount = 0;
     let listingsToStore = normalizedListings;
-    if (isAggregator) {
-      const dedupe = await dedupeAgainstDirectListings(normalizedListings);
+    if (isSecondPhase) {
+      const dedupe = await dedupeAgainstActiveListings(normalizedListings, adapter.id);
       listingsToStore = dedupe.kept;
       dedupedCount = dedupe.droppedCount;
       if (dedupedCount > 0) {
         console.warn(
-          `[syncEngine] ${adapter.id}: dropped ${dedupedCount} listing(s) already covered by a direct ` +
-            `developer source: ${dedupe.droppedTitles.slice(0, 10).join(", ")}${dedupedCount > 10 ? ", ..." : ""}`
+          `[syncEngine] ${adapter.id}: dropped ${dedupedCount} listing(s) already covered by another ` +
+            `active listing: ${dedupe.droppedTitles.slice(0, 10).join(", ")}${dedupedCount > 10 ? ", ..." : ""}`
         );
       }
     }
 
-    const diff = await upsertListingsForSource(
-      adapter.id,
-      listingsToStore,
-      isAggregator ? "aggregator" : "developer"
-    );
+    const sourceType: SourceType = isAggregatorSource(adapter.id)
+      ? "aggregator"
+      : isEstateAgentSource(adapter.id)
+      ? "estate-agent"
+      : "developer";
+
+    const diff = await upsertListingsForSource(adapter.id, listingsToStore, sourceType);
     const status: StoredSourceStatus =
       listingsToStore.length === 0 ? "no_results" : "ok";
 
@@ -214,12 +221,25 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
  * avoids re-queuing everything behind a shared render-concurrency limit when
  * only a few sources need a retry.
  *
- * Direct-developer adapters always run to completion BEFORE any aggregator
- * adapter starts (two sequential phases, not one big Promise.all) — dedupe.ts
- * needs the complete, freshly-synced set of direct listings already in
- * Supabase to correctly drop aggregator duplicates; running everything
- * concurrently would let an aggregator's dedupe query race a direct
- * source's write and silently miss real duplicates.
+ * Direct-developer adapters always run to completion BEFORE any second-phase
+ * adapter (aggregator or estate-agent — see isSecondPhaseSource) starts —
+ * dedupe.ts needs the complete, freshly-synced set of direct listings
+ * already in Supabase to correctly drop duplicates. Direct-developer
+ * adapters themselves still run concurrently (Promise.all) among each
+ * other — they never dedupe against one another, so there's no ordering
+ * requirement there.
+ *
+ * Second-phase adapters, however, run SEQUENTIALLY (one at a time, not
+ * Promise.all) — 2026-08: changed from concurrent, because
+ * dedupeAgainstActiveListings now checks a second-phase source's listings
+ * against every OTHER second-phase source too, not just direct developers
+ * (e.g. the two Benhams pages against each other). That only works if each
+ * one fully finishes (including its own write to Supabase) before the next
+ * one's dedupe query runs — running them concurrently would let two
+ * overlapping sources' dedupe queries race each other's writes and silently
+ * keep both copies of the same real listing. The real cost is a longer
+ * total second-phase runtime (no longer parallelized); accepted as the
+ * price of correct cross-source dedup.
  *
  * Refresh history (lib/historyStore.ts) is no longer tied to a sync run at
  * all — it's captured on a fixed daily schedule (Vercel Cron) or on demand
@@ -228,9 +248,11 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
 export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
   await pruneUnknownSources();
   const targets = sourceIds ? adapters.filter((a) => sourceIds.includes(a.id)) : adapters;
-  const directTargets = targets.filter((a) => !isAggregatorSource(a.id));
-  const aggregatorTargets = targets.filter((a) => isAggregatorSource(a.id));
+  const directTargets = targets.filter((a) => !isSecondPhaseSource(a.id));
+  const secondPhaseTargets = targets.filter((a) => isSecondPhaseSource(a.id));
 
   await Promise.all(directTargets.map((adapter) => runOne(adapter)));
-  await Promise.all(aggregatorTargets.map((adapter) => runOne(adapter)));
+  for (const adapter of secondPhaseTargets) {
+    await runOne(adapter);
+  }
 }

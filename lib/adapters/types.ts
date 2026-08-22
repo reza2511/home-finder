@@ -74,6 +74,22 @@ export interface AdapterListing {
   /** Null when the source doesn't state a bedroom count — never guessed. */
   bedrooms: number | null;
   bedroomType: BedroomTypeValue;
+  /** Absent/null when the source doesn't publish a per-listing bathroom
+   * count — never derived from bedroom count or any other proxy. Confirmed
+   * live (2026-08) as a real structured field on Winkworth, Hamptons (its
+   * per-listing detail page), and L&Q. */
+  bathrooms?: number | null;
+  /** Absent/null when the source doesn't publish a per-listing parking
+   * count. No adapter currently populates this — no source checked so far
+   * publishes it as a real structured field — left here for a future one
+   * that does, never invented in the meantime. */
+  parking?: number | null;
+  /** Floor number within the building (0 = ground floor), when the source
+   * states one for this specific home — never guessed from a
+   * development's overall height, unit numbering, or property type.
+   * Confirmed live (2026-08) as a real structured field on Berkeley,
+   * Fairview New Homes, L&Q, Barratt London, and Redrow. */
+  floor?: number | null;
   /** Null when the source doesn't publish tenure — never guessed. */
   tenure: TenureValue | null;
   isNewBuild: boolean;

@@ -38,9 +38,21 @@ export interface DeveloperEntry {
   verify?: boolean;
   notes?: string;
   /** "aggregator" for a real third-party listing site (1newhomes, Benhams —
-   * not the developer's own site); absent/undefined means a direct
+   * not the developer's own site); "estate-agent" for a general estate
+   * agent whose stock is predominantly resale (Winkworth), where only
+   * genuinely new-build listings are kept; absent/undefined means a direct
    * developer source. See lib/adapters/dedupe.ts for what this drives. */
-  source_type?: "aggregator";
+  source_type?: "aggregator" | "estate-agent";
+  /** When true, this source's own new-build discard filter is bypassed
+   * entirely — every listing the adapter collects is kept and stored with
+   * `isNewBuild: true`, no per-listing signal-checking at all. For a source
+   * whose page/section is already curated as new-build-only by the site
+   * itself (e.g. Winkworth's dedicated new-homes-for-sale section), so a
+   * text-based safety-net filter does more harm (false negatives from
+   * listings that don't happen to use one of the checked phrases) than good.
+   * Absent/undefined (the default) means the source's own filter, if any,
+   * still applies. See trustsAsNewBuild() below. */
+  trustAsNewBuild?: boolean;
 }
 
 interface DeveloperListFile {
@@ -75,6 +87,34 @@ export const ALLOWED_DEVELOPERS_BY_ID = new Map(ALLOWED_DEVELOPERS.map((d) => [d
  * through dedupe.ts before being stored. */
 export function isAggregatorSource(developerId: string): boolean {
   return ALLOWED_DEVELOPERS_BY_ID.get(developerId)?.source_type === "aggregator";
+}
+
+/** True if this developer id's registry entry is tagged `source_type:
+ * "estate-agent"` — a general estate agent whose stock is predominantly
+ * resale (Winkworth), where the adapter itself already discards anything
+ * without a genuine new-build signal (see hasExplicitNewBuildSignal in
+ * lib/adapters/newBuildDetection.ts) before a listing ever reaches here. */
+export function isEstateAgentSource(developerId: string): boolean {
+  return ALLOWED_DEVELOPERS_BY_ID.get(developerId)?.source_type === "estate-agent";
+}
+
+/** True if this developer id's registry entry is tagged
+ * `trustAsNewBuild: true` — the source's own adapter should skip its
+ * new-build discard filter entirely and keep every listing it collects,
+ * marked `isNewBuild: true` with no per-listing signal-checking. See
+ * DeveloperEntry.trustAsNewBuild above for when this is appropriate. */
+export function trustsAsNewBuild(developerId: string): boolean {
+  return ALLOWED_DEVELOPERS_BY_ID.get(developerId)?.trustAsNewBuild === true;
+}
+
+/** True if this source's listings should run in the sync engine's second
+ * phase (after every direct-developer source has finished) and be deduped
+ * against direct-developer listings before storage — aggregators and
+ * general estate agents alike, both non-direct sources where a real
+ * developer's own listing always wins. See runAllAdapters()/runOne() in
+ * lib/syncEngine.ts. */
+export function isSecondPhaseSource(developerId: string): boolean {
+  return isAggregatorSource(developerId) || isEstateAgentSource(developerId);
 }
 
 /**

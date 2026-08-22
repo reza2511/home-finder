@@ -53,10 +53,13 @@ export type TenureValue = "share_of_freehold" | "leasehold" | "freehold" | "shar
 export type BedroomTypeValue = "single" | "double" | null;
 
 /** "aggregator" for a listing from a real third-party listing site
- * (1newhomes, Benhams); "developer" (the default) for a developer's own
- * site. Surfaced so the UI can label aggregator-sourced listings if it
- * ever wants to — dedup itself already happened before storage. */
-export type SourceType = "developer" | "aggregator";
+ * (1newhomes, Benhams); "estate-agent" for a general estate agent whose
+ * stock is predominantly resale, with only genuinely new-build listings
+ * kept (Winkworth — see lib/adapters/newBuildDetection.ts's
+ * hasExplicitNewBuildSignal); "developer" (the default) for a developer's
+ * own site. Surfaced so the UI can label non-direct-developer listings if
+ * it ever wants to — dedup itself already happened before storage. */
+export type SourceType = "developer" | "aggregator" | "estate-agent";
 
 export interface Listing {
   sourceId: string;
@@ -76,6 +79,18 @@ export interface Listing {
   /** Null when the source doesn't state a bedroom count — never guessed. */
   bedrooms: number | null;
   bedroomType: BedroomTypeValue;
+  /** Absent/null when the source doesn't publish a per-listing bathroom
+   * count — never derived from bedroom count or any other proxy. Only a
+   * handful of sources currently state this (see lib/adapters/types.ts). */
+  bathrooms?: number | null;
+  /** Absent/null when the source doesn't publish a per-listing parking
+   * count. No current source publishes this — the field exists for when
+   * one does, never invented in the meantime. */
+  parking?: number | null;
+  /** Floor number within the building (0 = ground floor), when the source
+   * states one for this specific home — never guessed from a
+   * development's overall height, unit numbering, or property type. */
+  floor?: number | null;
   /** Null when the source doesn't publish tenure — never guessed. */
   tenure: TenureValue | null;
   isNewBuild: boolean;

@@ -32,9 +32,13 @@ const RESALE_SIGNAL_RE =
 // A genuine positive statement is never required to return true (the
 // default already is), but recognising one explicitly means a listing that
 // says so is grounded in real, present wording rather than just falling
-// through to the default for lack of a negative signal.
+// through to the default for lack of a negative signal. Kept permissive on
+// purpose (a false match here only mislabels an informational field, never
+// the `isNewBuild` result itself — see detectIsNewBuild below); do NOT
+// reuse this for hasExplicitNewBuildSignal further down, which needs much
+// higher precision — see that function's own doc comment for why.
 const NEW_BUILD_SIGNAL_RE =
-  /\bnew\s*build\b|\bnew\s*home[s]?\b|\boff[\s-]?plan\b|\bbrand\s*new\b|\bnewly\s*built\b|\bunder\s*construction\b|\bpractical\s*completion\b|\bcompletion\s*(?:date|due|in)\b|\bshow\s*home\b/i;
+  /\bnew[\s-]?build\b|\bnew[\s-]?home[s]?\b|\boff[\s-]?plan\b|\bnew[\s-]?development\b|\bbrand\s*new\b|\bnewly\s*built\b|\bunder\s*construction\b|\bpractical\s*completion\b|\bcompletion\s*(?:date|due|in)\b|\bshow\s*home\b/i;
 
 export type NewBuildSignal = "explicit_new_build" | "resale_signal" | "assumed_new_build_source";
 
@@ -81,4 +85,84 @@ export function applyNewBuildOverride(listing: AdapterListing): AdapterListing {
     return { ...listing, isNewBuild: false };
   }
   return listing;
+}
+
+/**
+ * Opposite-default detector, for a general estate-agent source whose stock
+ * is predominantly resale (source_type: "estate-agent" — e.g. Winkworth,
+ * added 2026-08 explicitly as a test of this resale-filtering approach).
+ * Every other source in this file defaults to *include* when uncertain
+ * because it's already scoped to new-build-only inventory by construction
+ * (see the file-header rationale above) — a general estate agent has no
+ * such guarantee, so here the default flips: a listing only counts as new
+ * build when its own text carries an explicit, genuine new-build signal.
+ * Silence is read as "this is ordinary resale stock", not "assume new
+ * build" — per an explicit instruction: when genuinely unsure, exclude.
+ *
+ * Deliberately does NOT reuse NEW_BUILD_SIGNAL_RE above — that pattern is
+ * fine for detectIsNewBuild() (a false match there only mislabels an
+ * informational "signal" field; the result is already `true` by default
+ * either way), but is far too permissive here, where a false match directly
+ * causes a real resale listing to be shown to the user as new build.
+ * Calibrated against Winkworth's own live listing text (2026-08): a bare
+ * "brand new"/"newly built" overwhelmingly turns out to modify a mundane
+ * renovated FEATURE of an ordinary resale property ("brand new kitchen",
+ * "brand new boiler", "brand new carpets", "brand new lease") rather than
+ * the property or building itself, and bare "new home(s)" is at least as
+ * often generic marketing filler ("your new home", "new homes in the
+ * area") as a genuine signal — so both require closer confirmation than
+ * detectIsNewBuild's list does:
+ *   - "new build" / "off-plan" / "show home" / "practical completion" /
+ *     "completion date|due|in" are high-precision on their own — kept as-is.
+ *     ("new build" and "new development"/"new home(s)" below all allow an
+ *     optional hyphen, not just a space — a real live miss otherwise: a
+ *     Winkworth new-homes listing describing itself as "a luxurious
+ *     one-bedroom new-build property" was wrongly excluded before this,
+ *     because the un-hyphenated pattern didn't match "new-build".)
+ *   - "new development" / "new home(s)" are kept UNLESS the surrounding
+ *     text shows they're about something else (a nearby scheme, or a
+ *     generic "find your new home" sign-off).
+ *   - "brand new" / "newly built" only count when closely followed by an
+ *     actual residential-unit-scale noun (home, apartment, development,
+ *     block, ...) rather than a fitting/fixture/legal term — this is what
+ *     rules out "brand new kitchen"/"boiler"/"carpets"/"lease" without
+ *     needing an ever-growing blacklist of every possible fixture noun.
+ *
+ * `structuredSignal` lets a caller pass a stronger, source-specific
+ * structured field (e.g. Winkworth's own `isDevelopment: true` on a
+ * property card) that should count as a genuine signal on its own, the
+ * same way detectTenure()'s `forceSharedOwnership` opt works — a real
+ * field the source itself publishes, not a guess layered on top of it.
+ */
+const HIGH_PRECISION_NEW_BUILD_RE =
+  /\bnew[\s-]?build\b|\boff[\s-]?plan\b|\bshow\s*home\b|\bpractical\s*completion\b|\bcompletion\s*(?:date|due|in)\b/i;
+
+const NEW_DEVELOPMENT_OR_HOME_RE = /\bnew[\s-]?development\b|\bnew[\s-]?home[s]?\b/i;
+
+// Neutralizes a "new development"/"new home(s)" match that's really about
+// something OTHER than this specific listing — a nearby/area-wide scheme,
+// or a generic real-estate sign-off ("your new home", "find your new
+// home") rather than a stated fact about this property or its building.
+const NEW_DEVELOPMENT_OR_HOME_FALSE_POSITIVE_RE =
+  /\b(?:in\s+the\s+area|nearby|locally|close\s+by|near(?:by)?|in\s+the\s+locality)\s+(?:new[\s-]?development|new[\s-]?home[s]?)\b|\b(?:new[\s-]?development|new[\s-]?home[s]?)\s+(?:in\s+the\s+area|nearby|locally)\b|\byour\s+new\s+home\b|\b(?:perfect|dream|ideal|forever|next)\s+new\s+home\b|\bfind\s+your\s+new\s+home\b|\bmake\s+(?:this|it)\b[^.]{0,40}\byour\s+new\s+home\b/i;
+
+// A residential-unit-scale noun — what "brand new"/"newly built" must be
+// describing for either phrase to count (see doc comment above).
+const RESIDENTIAL_UNIT_NOUN_SOURCE =
+  "(?:homes?|houses?|apartments?|flats?|properties|residences?|developments?|builds?|blocks?|schemes?|mews\\s+houses?)";
+const BRAND_NEW_OR_NEWLY_BUILT_RE = new RegExp(
+  `\\b(?:brand[\\s-]?new|newly\\s*built)\\b(?:\\s+\\S+){0,6}?\\s+${RESIDENTIAL_UNIT_NOUN_SOURCE}\\b`,
+  "i"
+);
+
+export function hasExplicitNewBuildSignal(
+  text: string | null | undefined,
+  opts?: { structuredSignal?: boolean }
+): boolean {
+  if (opts?.structuredSignal) return true;
+  if (!text) return false;
+  if (HIGH_PRECISION_NEW_BUILD_RE.test(text)) return true;
+  if (NEW_DEVELOPMENT_OR_HOME_RE.test(text) && !NEW_DEVELOPMENT_OR_HOME_FALSE_POSITIVE_RE.test(text)) return true;
+  if (BRAND_NEW_OR_NEWLY_BUILT_RE.test(text)) return true;
+  return false;
 }

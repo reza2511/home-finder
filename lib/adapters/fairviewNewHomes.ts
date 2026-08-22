@@ -57,6 +57,12 @@
  * growth-detection (stops early once a click adds no new cards) to avoid
  * ever spinning forever on a stuck/decorative button.
  *
+ * Floor: each plot's own `floor` field is a real number, but ONLY when its
+ * `showfloor` flag is true — confirmed live, house plots carry `showfloor:
+ * false` with `floor` instead holding a house-type code ("Det", "SD"), not
+ * a floor number, so that flag is checked rather than trusting the raw
+ * value alone.
+ *
  * Tenure is never stated anywhere in this JSON (checked directly: no field
  * on either the development or plot objects, and none of the London
  * developments' title/products/plot description/homeType text mentions
@@ -125,6 +131,12 @@ interface FairviewPlot {
   bedrooms?: number;
   url?: string;
   coverimage?: string;
+  // Real per-plot floor number (e.g. "2"), but ONLY meaningful when
+  // `showfloor` is true — confirmed live: house plots carry `showfloor:
+  // false` with `floor` instead holding a house-type abbreviation ("Det",
+  // "SD"), not a floor number at all.
+  floor?: string;
+  showfloor?: boolean;
 }
 
 interface FairviewDevelopment {
@@ -181,6 +193,18 @@ function parsePlotPrice(plot: FairviewPlot): number | null {
 
 function formatGbp(n: number): string {
   return `£${n.toLocaleString("en-GB")}`;
+}
+
+/** Real floor number for an apartment plot — null whenever `showfloor` is
+ * false (house plots; `floor` there holds a house-type code, not a floor
+ * number — see the FairviewPlot interface) or the value doesn't parse to a
+ * number. 0 (ground floor) is a valid result, so an empty/absent string is
+ * distinguished from it explicitly. */
+function parsePlotFloor(plot: FairviewPlot): number | null {
+  if (plot.showfloor !== true) return null;
+  if (plot.floor == null || plot.floor.trim() === "") return null;
+  const n = parseInt(plot.floor, 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 // ---------- fallback strategies (only reached if the JSON feed is empty) ----------
@@ -430,6 +454,7 @@ export const fairviewNewHomesAdapter: SourceAdapter = {
               mainImage: image,
               bedrooms: typeof plot.bedrooms === "number" ? plot.bedrooms : null,
               bedroomType: null, // not published per room
+              floor: parsePlotFloor(plot),
               tenure: detectTenure(`${dev.title} ${dev.products ?? ""} ${plot.description ?? ""} ${plot.homeType ?? ""}`),
               isNewBuild: detectIsNewBuild(`${dev.title} ${plot.description ?? ""}`).isNewBuild,
               postcode,

@@ -33,6 +33,11 @@
  * data through any other endpoint, and no page anywhere states tenure. Both
  * gaps are left as `null`/absent rather than guessed — see `tenure` and
  * `bedroomType` below.
+ *
+ * Floor: some (not all — houses and some flats don't) plot cards carry a
+ * real "Floor N" `<li>` inside the same `plot__features` block as the
+ * bedroom count and price (confirmed live) — parsed directly, left `null`
+ * when that li isn't present rather than guessed.
  */
 import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } from "./types";
 import { isBotBlockSignal } from "./blockDetection";
@@ -114,6 +119,7 @@ interface ParsedPlot {
   image: string;
   bedrooms: number;
   bedroomLabel: string;
+  floor: number | null;
   price: number;
   isNewBuild: boolean;
 }
@@ -133,6 +139,10 @@ function parsePlots(html: string): ParsedPlot[] {
     const bedrooms = /studio/i.test(bedroomLabel) ? 0 : parseInt(bedroomLabel, 10) || 0;
     const price = parseInt(priceMatch[1].replace(/,/g, ""), 10);
     const plotNumberMatch = heading.match(/\d+/);
+    // A real "Floor N" li on this exact card (confirmed live) — only some
+    // plots state it (e.g. houses/ground-floor maisonettes don't), never
+    // guessed when absent.
+    const floorMatch = featuresBlock.match(/\bFloor\s*(\d+)\b/i);
 
     plots.push({
       url,
@@ -140,6 +150,7 @@ function parsePlots(html: string): ParsedPlot[] {
       image: absoluteUrl(bestImage),
       bedrooms,
       bedroomLabel,
+      floor: floorMatch ? parseInt(floorMatch[1], 10) : null,
       price,
       isNewBuild: detectIsNewBuild(featuresBlock.replace(/<[^>]+>/g, " ")).isNewBuild,
     });
@@ -213,6 +224,7 @@ export const barrattLondonAdapter: SourceAdapter = {
           mainImage: images[0] ?? null,
           bedrooms: plot.bedrooms,
           bedroomType: null, // Barratt doesn't publish single/double per room
+          floor: plot.floor,
           // Checked for shared ownership specifically (re-verified live):
           // several development pages have a "Home Reach" (Barratt's
           // shared-ownership scheme) jump-link in their nav, but that
