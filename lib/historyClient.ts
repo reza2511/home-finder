@@ -29,3 +29,16 @@ export async function fetchHistorySnapshot(id: string): Promise<HistorySnapshotD
   }
   return res.json();
 }
+
+/** Manual, instant capture — the "Capture history now" button. Doesn't
+ * trigger a sync or wait for the 2h delay; saves whatever's currently in
+ * `listings` right now, in the same format the automatic capture uses. */
+export async function captureHistoryNow(): Promise<HistorySnapshotSummary> {
+  const res = await fetch("/api/history/capture", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Failed to capture history (${res.status})`);
+  }
+  const data = await res.json();
+  return data.snapshot;
+}

@@ -595,6 +595,19 @@ button {
   margin-top: 16px;
 }
 
+.refresh-history__header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.refresh-history__capture-btn {
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
 .refresh-history__list {
   display: flex;
   flex-direction: column;

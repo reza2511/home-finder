@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { fetchSession } from "@/lib/authClient";
-import { fetchHistoryList, fetchHistorySnapshot, type HistorySnapshotDetail, type HistorySnapshotSummary } from "@/lib/historyClient";
+import {
+  captureHistoryNow,
+  fetchHistoryList,
+  fetchHistorySnapshot,
+  type HistorySnapshotDetail,
+  type HistorySnapshotSummary,
+} from "@/lib/historyClient";
 import { formatDateTime } from "@/lib/relativeTime";
 
 interface Props {
@@ -22,7 +28,12 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
   const [authenticated, setAuthenticated] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshotSummary[] | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function refreshList() {
+    return fetchHistoryList().then(setSnapshots);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -59,9 +70,37 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
     }
   }
 
+  // Instant capture — does NOT trigger a sync and does NOT wait 2h; saves
+  // whatever's currently in `listings` right now (see POST
+  // /api/history/capture). Re-fetches the list afterwards so the new
+  // snapshot (and the "oldest dropped" effect of the 3-kept cap) shows up
+  // immediately, same as after picking a snapshot.
+  async function handleCaptureNow() {
+    setCapturing(true);
+    setError(null);
+    try {
+      await captureHistoryNow();
+      await refreshList();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to capture history");
+    } finally {
+      setCapturing(false);
+    }
+  }
+
   return (
     <section className="refresh-history" aria-label="Refresh history">
-      <h2 className="dev-filter__heading">Refresh history</h2>
+      <div className="refresh-history__header">
+        <h2 className="dev-filter__heading">Refresh history</h2>
+        <button
+          type="button"
+          className="btn btn--ghost refresh-history__capture-btn"
+          onClick={handleCaptureNow}
+          disabled={capturing}
+        >
+          {capturing ? "Capturing…" : "Capture history now"}
+        </button>
+      </div>
 
       {error && <div className="status-banner status-banner--error">{error}</div>}
 

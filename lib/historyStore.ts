@@ -24,6 +24,10 @@
  * "sometime within ~24h of the 2h mark", not a tight ~2h-after-start
  * window. Move this to a per-minute schedule (e.g. every 15 min) if the
  * project is ever upgraded to Pro, which allows per-minute cron scheduling.
+ *
+ * `captureSnapshotNow()` is the separate manual path — the "Capture history
+ * now" button (POST /api/history/capture) — for an instant capture that
+ * doesn't wait for the 2h delay or trigger a new sync.
  */
 import { requireSupabaseAdmin } from "./db";
 import { fetchActiveListings } from "./listingsQuery";
@@ -118,6 +122,72 @@ export async function captureDueSnapshots(): Promise<{
   const prunedSnapshots = await pruneOldSnapshots();
 
   return { processed, prunedSnapshots, errors };
+}
+
+interface NewRun {
+  id: string;
+  started_at: string;
+}
+
+interface NewSnapshot {
+  id: string;
+  captured_at: string;
+  listing_count: number;
+}
+
+/** Manual, instant capture — triggered by the "Capture history now" button
+ * (POST /api/history/capture), not the cron job. Creates its own `sync_runs`
+ * row (started_at = now()) rather than waiting for or reusing a pending one,
+ * so it never interferes with the automatic ~2h-after-start capture — that
+ * row is immediately marked snapshotted too, honestly recording that this
+ * run's snapshot was taken right away, not after a delay. Same table, same
+ * shape, same pruning-to-MAX_KEPT_SNAPSHOTS as the automatic path — just
+ * skipping the "wait until due" check entirely. Never triggers a sync;
+ * captures whatever is currently in `listings` at the moment it's called. */
+export async function captureSnapshotNow(): Promise<HistorySnapshotSummary> {
+  const admin = requireSupabaseAdmin();
+
+  const { data: run, error: runErr } = await admin
+    .from("sync_runs")
+    .insert({})
+    .select("id, started_at")
+    .single<NewRun>();
+  if (runErr || !run) {
+    throw new Error(`captureSnapshotNow: failed to create sync_runs row: ${runErr?.message ?? "no row returned"}`);
+  }
+
+  const { listings, error } = await fetchActiveListings(admin);
+  if (error) throw new Error(error);
+
+  const { data: snapshot, error: insertErr } = await admin
+    .from("sync_history_snapshots")
+    .insert({ run_id: run.id, listing_count: listings.length, listings })
+    .select("id, captured_at, listing_count")
+    .single<NewSnapshot>();
+  if (insertErr || !snapshot) {
+    throw new Error(`captureSnapshotNow: insert failed: ${insertErr?.message ?? "no row returned"}`);
+  }
+
+  const { error: markErr } = await admin
+    .from("sync_runs")
+    .update({ snapshotted_at: snapshot.captured_at })
+    .eq("id", run.id);
+  if (markErr) {
+    // Non-fatal — the snapshot itself is already saved and will still show
+    // up in listRecentSnapshots(); this only affects whether the cron job
+    // would (redundantly, harmlessly) also try this same run, which it
+    // won't anyway since it only looks at runs ≥2h old.
+    console.warn(`[historyStore] captureSnapshotNow: marking snapshotted failed (non-fatal): ${markErr.message}`);
+  }
+
+  await pruneOldSnapshots();
+
+  return {
+    id: snapshot.id,
+    runStartedAt: run.started_at,
+    capturedAt: snapshot.captured_at,
+    listingCount: snapshot.listing_count,
+  };
 }
 
 /** Keeps only the MAX_KEPT_SNAPSHOTS most recent rows in
