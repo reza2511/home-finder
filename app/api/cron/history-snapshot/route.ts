@@ -4,10 +4,11 @@ import { captureDueSnapshots } from "@/lib/historyStore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Invoked every 15 min by Vercel Cron (see the "crons" entry in vercel.json)
-// — this is what actually gives the fixed "~2h after a sync started" capture
-// a live setTimeout can't survive on serverless (see lib/historyStore.ts's
-// file header for why). Idempotent: a run only ever gets captured once
+// Invoked once daily by Vercel Cron (see the "crons" entry in vercel.json —
+// the Hobby plan rejects any more-frequent schedule at deploy time, see
+// lib/historyStore.ts's file header) — this is what actually captures a
+// snapshot ~2h after a sync started, since a live setTimeout can't survive
+// on serverless. Idempotent: a run only ever gets captured once
 // (captureDueSnapshots only selects sync_runs still missing a snapshot), so
 // an extra/overlapping invocation is a safe no-op, not a duplicate snapshot.
 //

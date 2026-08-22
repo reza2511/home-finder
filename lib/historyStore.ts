@@ -8,12 +8,22 @@
  * ending (Vercel functions aren't long-running processes) — the process
  * launching the sync will be gone long before 2 hours pass. Instead,
  * `recordSyncRunStart()` just writes down *when* a full sync started, and a
- * separate scheduled job (Vercel Cron → GET /api/cron/history-snapshot,
- * every 15 min — see vercel.json) calls `captureDueSnapshots()`, which asks
- * Postgres directly "which runs started ≥2h ago and haven't been
- * snapshotted yet?" and captures each one it finds. This gives a reliable,
- * fixed ~2h-after-start capture regardless of which serverless instance (if
- * any) happens to be running when that moment actually arrives.
+ * separate scheduled job (Vercel Cron → GET /api/cron/history-snapshot —
+ * see vercel.json) calls `captureDueSnapshots()`, which asks Postgres
+ * directly "which runs started ≥2h ago and haven't been snapshotted yet?"
+ * and captures each one it finds — regardless of which serverless instance
+ * (if any) happens to be running when that moment actually arrives.
+ *
+ * Cron cadence is once daily (`0 0 * * *`), not every 15 min as originally
+ * built — this Vercel project is on the Hobby plan, which rejects any cron
+ * expression that would run more than once a day at deploy time ("Hobby
+ * accounts are limited to daily cron jobs"), confirmed live: the first
+ * deploy with a 15-min schedule failed outright. `captureDueSnapshots()`
+ * itself is unaffected — it still correctly captures any run that's been
+ * due for anywhere up to a day — but the *actual* capture moment is now
+ * "sometime within ~24h of the 2h mark", not a tight ~2h-after-start
+ * window. Move this to a per-minute schedule (e.g. every 15 min) if the
+ * project is ever upgraded to Pro, which allows per-minute cron scheduling.
  */
 import { requireSupabaseAdmin } from "./db";
 import { fetchActiveListings } from "./listingsQuery";
