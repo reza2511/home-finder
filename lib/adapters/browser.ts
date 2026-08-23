@@ -76,3 +76,34 @@ export function getSharedBrowser(): Promise<Browser> {
   }
   return globalThis.__sharedBrowser;
 }
+
+/**
+ * Closes the shared Chromium instance and clears the cached promise, if one
+ * was ever launched — a no-op otherwise. An open Playwright `Browser` keeps
+ * a live connection to its browser subprocess, which keeps Node's event
+ * loop alive indefinitely; a short-lived process that's genuinely done
+ * needs this called before it can exit on its own (see
+ * scripts/run-sync.ts, which also force-exits afterwards as a backstop).
+ *
+ * Deliberately never called from any Vercel-facing route or from
+ * lib/syncEngine.ts itself — keeping the browser warm across invocations
+ * within the same warm serverless instance is the whole point of the
+ * shared singleton there (see this file's own header); closing it after
+ * every sync would defeat that.
+ */
+export async function closeSharedBrowser(): Promise<void> {
+  const pending = globalThis.__sharedBrowser;
+  if (!pending) return;
+  globalThis.__sharedBrowser = undefined;
+  try {
+    const browser = await pending;
+    await browser.close();
+  } catch (err) {
+    // Best-effort — the caller is about to force-exit the process anyway
+    // (see scripts/run-sync.ts), so a browser that's already gone or
+    // refuses to close cleanly isn't worth failing the run over.
+    console.warn(
+      `[browser] closeSharedBrowser: failed to close cleanly (non-fatal): ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}

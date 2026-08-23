@@ -28,7 +28,12 @@ import type { SourceType, StoredSourceStatus } from "./types";
 // fetch/Playwright/AI pipeline) before falling back to the original
 // listings_url — see createAutoAdapter in adapters/autoAdapter.ts — so its
 // worst case is several times a single attempt's, not just one.
-const ADAPTER_TIMEOUT_MS = 900_000;
+//
+// Exported so scripts/run-sync.ts can size its own outer, script-level
+// per-source timeout relative to this one (a generous buffer above it,
+// not a competing shorter value) — see that file for why a second timeout
+// layer exists at all.
+export const ADAPTER_TIMEOUT_MS = 900_000;
 
 interface SyncStatusUpsertRow {
   source_id: string;
