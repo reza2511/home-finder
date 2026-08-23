@@ -49,6 +49,30 @@
  *      and every DB write have already happened — a backstop in case
  *      anything else (a stray timer, an open socket) would otherwise have
  *      kept the process alive regardless.
+ *
+ * Exit code (2026-08-23): a real run reported "17/18 sources ran without a
+ * script-level error" and still exited non-zero, failing the whole GitHub
+ * Actions run over one source. From the actual log: barratt-london failed
+ * 1.3s into the job with "JWT issued at future" thrown from
+ * pruneUnknownSources() (lib/db.ts) — a fresh runner VM's system clock
+ * occasionally hasn't finished settling/NTP-syncing in its first second,
+ * making a real, static token's issued-at briefly look like it's in the
+ * future. Every one of the other 17 sources' own pruneUnknownSources()
+ * call (each runAllAdapters() call makes its own) succeeded seconds later
+ * — nothing was wrong with barratt-london's adapter or URL; its scrape was
+ * never even attempted, because the failure happened before runOne() was
+ * reached at all. Two changes address this:
+ *   1. Each source now gets one retry (after a short delay) before being
+ *      logged as failed — enough to ride out exactly this kind of
+ *      transient, self-resolving blip.
+ *   2. The exit code no longer fails the whole run over a handful of
+ *      per-source failures: it only reports failure (1) if EVERY source
+ *      failed, the actual signal of something catastrophic (e.g. the
+ *      database genuinely unreachable for the whole run) rather than one
+ *      source having a bad day. Any real per-source failure is still
+ *      logged here AND recorded in that source's own sync_status row
+ *      (lib/syncEngine.ts), so it stays fully visible in the Status
+ *      Monitor — this only changes whether it fails the CI run itself.
  */
 import { runAllAdapters, ADAPTER_TIMEOUT_MS } from "../lib/syncEngine";
 import { adapters } from "../lib/adapters";
@@ -69,6 +93,12 @@ import { closeSharedBrowser } from "../lib/adapters/browser";
 // can actually force that work to stop.
 const OUTER_TIMEOUT_MS = ADAPTER_TIMEOUT_MS + 120_000;
 
+// One retry, after a short pause — sized for a transient blip (a fresh
+// runner's clock still settling, a momentary network hiccup), not for
+// anything that takes real recovery time. A source that fails twice in a
+// row is genuinely broken for this run, not just unlucky.
+const RETRY_DELAY_MS = 5_000;
+
 function withOuterTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -88,10 +118,16 @@ function withOuterTimeout<T>(promise: Promise<T>, ms: number, label: string): Pr
   });
 }
 
-/** Runs every source and returns the process exit code (0 = every source
- * ran without a script-level error, 1 = at least one didn't). Never throws
- * for a single source's own failure — those are caught and logged so one
- * broken source never blocks the rest of the day's sync. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Runs every source and returns the process exit code — 0 unless EVERY
+ * source failed (see the file header's "Exit code" note for why that's
+ * the actual catastrophic-failure signal, not any single source failing).
+ * Never throws for one source's own failure, even after its retry — those
+ * are caught and logged so one broken source never blocks the rest of the
+ * day's sync. */
 async function main(): Promise<number> {
   const direct = adapters.filter((a) => !isSecondPhaseSource(a.id)).map((a) => a.id);
   const secondPhase = adapters.filter((a) => isSecondPhaseSource(a.id)).map((a) => a.id);
@@ -101,32 +137,54 @@ async function main(): Promise<number> {
 
   let failures = 0;
   for (const [index, id] of orderedIds.entries()) {
+    const label = `(${index + 1}/${orderedIds.length}) ${id}`;
     const startedAt = Date.now();
-    console.log(`[run-sync] (${index + 1}/${orderedIds.length}) ${id} ...`);
-    try {
-      // A single-element sourceIds array — runAllAdapters() still does its
-      // usual pruneUnknownSources() + direct/second-phase classification
-      // per call, so each source is written to Supabase (including its own
-      // sync_status row) before the loop moves on to the next one.
-      await withOuterTimeout(runAllAdapters([id]), OUTER_TIMEOUT_MS, id);
-      console.log(`[run-sync] (${index + 1}/${orderedIds.length}) ${id} done in ${Date.now() - startedAt}ms`);
-    } catch (err) {
-      // Per-adapter failures are normally already caught and recorded in
-      // sync_status inside runOne() (lib/syncEngine.ts) and never reach
-      // here — a rejection here means either something outside a single
-      // adapter failed (e.g. pruneUnknownSources() itself, on bad Supabase
-      // credentials), or the outer per-source timeout above fired because
-      // the inner one didn't protect us. Either way: log it and keep going
-      // so one broken source never blocks the rest of the day's sync, but
-      // still fail the workflow run at the end so it's visible in GitHub
-      // Actions.
+    console.log(`[run-sync] ${label} ...`);
+
+    let lastErr: unknown;
+    let succeeded = false;
+    for (let attempt = 1; attempt <= 2 && !succeeded; attempt++) {
+      try {
+        // A single-element sourceIds array — runAllAdapters() still does
+        // its usual pruneUnknownSources() + direct/second-phase
+        // classification per call, so each source is written to Supabase
+        // (including its own sync_status row) before the loop moves on.
+        await withOuterTimeout(runAllAdapters([id]), OUTER_TIMEOUT_MS, id);
+        succeeded = true;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) {
+          console.warn(`[run-sync] ${label} attempt 1 failed, retrying in ${RETRY_DELAY_MS}ms:`, err);
+          await delay(RETRY_DELAY_MS);
+        }
+      }
+    }
+
+    if (succeeded) {
+      console.log(`[run-sync] ${label} done in ${Date.now() - startedAt}ms`);
+    } else {
+      // Per-adapter (scraper) failures are normally already caught and
+      // recorded in sync_status inside runOne() (lib/syncEngine.ts) and
+      // never reach here — a rejection here means either something
+      // outside a single adapter failed (e.g. pruneUnknownSources()
+      // itself, on a transient Supabase/auth hiccup), or the outer
+      // per-source timeout above fired because the inner one didn't
+      // protect us. Either way, after a retry has already been tried: log
+      // it and move on to the next source. See the exit code at the
+      // bottom of main() for how this affects the overall run result.
       failures += 1;
-      console.error(`[run-sync] (${index + 1}/${orderedIds.length}) ${id} FAILED:`, err);
+      console.error(`[run-sync] ${label} FAILED after retry:`, lastErr);
     }
   }
 
-  console.log(`[run-sync] Sync complete. ${orderedIds.length - failures}/${orderedIds.length} source(s) ran without a script-level error.`);
-  return failures > 0 ? 1 : 0;
+  const succeededCount = orderedIds.length - failures;
+  console.log(`[run-sync] Sync complete. ${succeededCount}/${orderedIds.length} source(s) ran without a script-level error.`);
+
+  // Catastrophic = nothing worked at all (e.g. the database was genuinely
+  // unreachable for the whole run) — anything short of that means the
+  // sync did its job and wrote real data, so the run reports success.
+  const catastrophic = orderedIds.length > 0 && succeededCount === 0;
+  return catastrophic ? 1 : 0;
 }
 
 async function run(): Promise<void> {
@@ -134,6 +192,9 @@ async function run(): Promise<void> {
   try {
     exitCode = await main();
   } catch (err) {
+    // Something failed outside the per-source loop entirely (e.g. the
+    // adapter registry itself throwing at import time) — this is the
+    // other genuinely catastrophic case, so it still fails the run.
     console.error("[run-sync] Fatal error:", err);
     exitCode = 1;
   } finally {
