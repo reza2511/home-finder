@@ -1,0 +1,100 @@
+name: Daily Sync
+
+# Runs the listings sync (scripts/run-sync.ts -> lib/syncEngine.ts) on
+# GitHub's own runners, independent of whether any PC is on.
+#
+# GitHub Actions `schedule` cron is always UTC and has no timezone/DST
+# support, so "6:00 AM UK time" year-round needs two triggers:
+#   - 05:00 UTC = 06:00 BST (late March -> late October)
+#   - 06:00 UTC = 06:00 GMT (late October -> late March)
+# Both fire every day; the "Check UK local time" step below only lets the
+# rest of the job run when it's actually ~6am in Europe/London, so exactly
+# one of the two schedules does anything on any given day (the other exits
+# immediately as a no-op). A `workflow_dispatch` trigger is also included
+# so you can run it manually at any time of day for testing — see the repo
+# README / PR description for the exact steps to do that.
+on:
+  schedule:
+    - cron: "0 5 * * *" # 06:00 BST
+    - cron: "0 6 * * *" # 06:00 GMT
+  workflow_dispatch: {}
+
+# Never run two syncs at once. A single sync is a single ordered write
+# process against Supabase (dedupe relies on each source finishing its own
+# write before the next one's dedupe query runs — see lib/syncEngine.ts and
+# scripts/run-sync.ts) and can legitimately take a long time on a busy day,
+# so a second trigger (e.g. a manual test run while the scheduled one is
+# still going) queues behind it instead of running concurrently.
+concurrency:
+  group: daily-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # Sequential worst case: up to ~40 sources x up to 900s (15 min) each if
+    # every single one timed out. That's far beyond what a normal run
+    # takes, but the cap is set generously below GitHub's own 360-minute
+    # hard limit for hosted runners so a genuinely stuck run still gets
+    # killed rather than silently eating the whole day.
+    timeout-minutes: 340
+    steps:
+      - name: Check UK local time
+        id: gate
+        run: |
+          hour=$(TZ='Europe/London' date +%H)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manually triggered — running now regardless of time of day."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$hour" = "06" ]; then
+            echo "It's 06:xx in Europe/London — running the scheduled sync."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "It's ${hour}:xx in Europe/London, not 06:xx — this is the other seasonal schedule's trigger, skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repo
+        if: steps.gate.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        if: steps.gate.outputs.should_run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Node dependencies
+        if: steps.gate.outputs.should_run == 'true'
+        run: npm ci
+
+      # Only Chromium is ever launched (see lib/adapters/browser.ts) — no
+      # need to install Firefox/WebKit too. --with-deps also installs the
+      # OS-level libraries (fonts, libgbm, etc.) Chromium needs to run
+      # headless on this bare Ubuntu runner.
+      - name: Install Playwright browsers
+        if: steps.gate.outputs.should_run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      # scripts/run-sync.ts calls the same runAllAdapters() the app's own
+      # "Run sync now" button (app/api/sync/route.ts) does, but drives every
+      # source ONE AT A TIME (direct-developer sources first, then
+      # second-phase ones), instead of production's Promise.all over direct
+      # sources — deliberately more conservative here, since a shared
+      # 2-vCPU Actions runner can't safely host several concurrent
+      # Playwright Chromium renders the way Vercel's infra can. No
+      # per-source caps change: ADAPTER_TIMEOUT_MS, MAX_CONCURRENT_RENDERS,
+      # and every adapter's own per-page/per-source limits all apply
+      # exactly as they do in production.
+      - name: Run sync
+        if: steps.gate.outputs.should_run == 'true'
+        run: npm run sync
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
