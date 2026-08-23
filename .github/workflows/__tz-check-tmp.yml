@@ -1,0 +1,15 @@
+name: TZ Check (temporary diagnostic)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report UTC vs Europe/London
+        run: |
+          echo "UTC now:            $(date -u)"
+          echo "Europe/London now:  $(TZ='Europe/London' date)"
+          echo "Europe/London hour: $(TZ='Europe/London' date +%H)"
+          echo "Europe/London zone/offset: $(TZ='Europe/London' date +'%Z %z')"
