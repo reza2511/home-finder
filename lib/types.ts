@@ -97,3 +97,13 @@ export interface Listing {
   postcode: string;
   area: string;
 }
+
+/** A listing that has gone inactive (vanished from its source during a
+ * sync — likely sold/withdrawn), for the public Removed items page. Same
+ * shape as `Listing` plus `removedAt`: the timestamp of the sync run that
+ * first noticed it was gone (lib/listingsStore.ts). Only listings removed
+ * since this column started being recorded ever have one — see
+ * supabase/migrations/0008_add_listing_removed_at.sql. */
+export interface RemovedListing extends Listing {
+  removedAt: string;
+}

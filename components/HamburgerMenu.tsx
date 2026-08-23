@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// Top-corner navigation menu — currently just links to /compare, but a
-// dedicated menu component (rather than another header button) so future
-// pages have somewhere to go without crowding app-header__actions.
+// Top-corner navigation menu — a dedicated menu component (rather than
+// another header button) so pages beyond the home grid have somewhere to
+// go without crowding app-header__actions.
 export default function HamburgerMenu() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -48,6 +48,9 @@ export default function HamburgerMenu() {
           </a>
           <a href="/favourites" role="menuitem" className="hamburger-menu__item">
             Favourites
+          </a>
+          <a href="/removed" role="menuitem" className="hamburger-menu__item">
+            Removed items
           </a>
         </nav>
       )}

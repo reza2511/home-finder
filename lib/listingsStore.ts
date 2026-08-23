@@ -19,9 +19,12 @@ interface ExistingRow {
 /**
  * Upserts a source's freshly-fetched listings into Supabase and diffs them
  * against what was previously active for that source. Any previously-active
- * listing not present in `incoming` is marked inactive ("removed"). A
- * listing seen again (present both before and after) counts as "updated" —
- * this is a simple re-seen count, not a field-level change diff.
+ * listing not present in `incoming` is marked inactive ("removed") and
+ * stamped with `removed_at` — the moment this run first noticed it was
+ * gone, which is what the public Removed items page (lib/removedListingsQuery.ts)
+ * sorts and filters by. A listing seen again (present both before and
+ * after) counts as "updated" — this is a simple re-seen count, not a
+ * field-level change diff.
  *
  * Writes via the service_role client (requireSupabaseAdmin) since RLS has
  * no anon/authenticated insert or update policy on `listings` — see
@@ -60,8 +63,12 @@ export async function upsertListingsForSource(
     else added += 1;
   }
 
+  // Shared across both the upsert below and the removal update further
+  // down, so a listing added AND another removed in the same sync call get
+  // the exact same timestamp rather than two clock reads a moment apart.
+  const now = new Date().toISOString();
+
   if (incoming.length > 0) {
-    const now = new Date().toISOString();
     const rows = incoming.map((listing) => ({
       source_id: sourceId,
       external_id: listing.externalId,
@@ -84,6 +91,10 @@ export async function upsertListingsForSource(
       source_type: sourceType,
       last_seen_at: now,
       active: true,
+      // A listing that reappears after previously going inactive is no
+      // longer "removed" — clear any removed_at it was carrying so it
+      // doesn't linger on the Removed items page.
+      removed_at: null,
       // first_seen_at deliberately omitted from every row: on INSERT the
       // column's own `default now()` fills it; on UPDATE (conflict),
       // leaving it out of the payload means the ON CONFLICT DO UPDATE
@@ -105,7 +116,7 @@ export async function upsertListingsForSource(
   if (toRemove.length > 0) {
     const { error: removeErr } = await admin
       .from("listings")
-      .update({ active: false })
+      .update({ active: false, removed_at: now })
       .eq("source_id", sourceId)
       .in("external_id", toRemove);
     if (removeErr) {
