@@ -27,15 +27,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAdmin } from "./db";
 import { fetchActiveListings } from "./listingsQuery";
-import type { Listing } from "./types";
+import { summarizeBySource, type SourceBreakdownEntry } from "./sourceBreakdown";
 
 export const MAX_KEPT_SNAPSHOTS = 10;
 
-export interface SourceBreakdownEntry {
-  sourceId: string;
-  sourceName: string;
-  listingCount: number;
-}
+export type { SourceBreakdownEntry };
 
 export interface HistorySnapshotSummary {
   id: string;
@@ -43,25 +39,6 @@ export interface HistorySnapshotSummary {
   capturedAt: string;
   listingCount: number;
   sources: SourceBreakdownEntry[];
-}
-
-/** One entry per distinct source present in `listings`, sorted by name —
- * "how many sources updated" is just `.length`, "which sources" is the
- * `sourceName`s, computed once at capture time from real listing rows,
- * never guessed or estimated. */
-function summarizeBySource(listings: Listing[]): SourceBreakdownEntry[] {
-  const counts = new Map<string, { sourceName: string; listingCount: number }>();
-  for (const listing of listings) {
-    const existing = counts.get(listing.sourceId);
-    if (existing) {
-      existing.listingCount++;
-    } else {
-      counts.set(listing.sourceId, { sourceName: listing.sourceName, listingCount: 1 });
-    }
-  }
-  return [...counts.entries()]
-    .map(([sourceId, v]) => ({ sourceId, sourceName: v.sourceName, listingCount: v.listingCount }))
-    .sort((a, b) => a.sourceName.localeCompare(b.sourceName));
 }
 
 interface NewRun {

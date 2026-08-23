@@ -12,6 +12,7 @@ import { applySharedOwnershipOverride } from "./adapters/tenureDetection";
 import { applyNewBuildOverride } from "./adapters/newBuildDetection";
 import { dedupeAgainstActiveListings } from "./adapters/dedupe";
 import { upsertListingsForSource } from "./listingsStore";
+import { captureDailyStatsSnapshot } from "./statsStore";
 import type { SourceType, StoredSourceStatus } from "./types";
 
 // Some adapters make several real, sequential HTTP requests (Barratt London:
@@ -254,5 +255,22 @@ export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
   await Promise.all(directTargets.map((adapter) => runOne(adapter)));
   for (const adapter of secondPhaseTargets) {
     await runOne(adapter);
+  }
+
+  // Statistics page snapshot (lib/statsStore.ts) — upserts today's UTC-date
+  // row with whatever's now active, regardless of whether this call synced
+  // every source or just a handful via `sourceIds` (scripts/run-sync.ts
+  // calls this once per source, sequentially — see its own file header;
+  // each call's upsert just overwrites the same day's row, and by the time
+  // that loop's last call runs, every source has been synced at least once
+  // today, so the row that survives is still the complete picture). Never
+  // lets a capture failure fail the sync itself — best-effort, same as
+  // recordRemovedFavourites in lib/listingsStore.ts.
+  try {
+    await captureDailyStatsSnapshot();
+  } catch (err) {
+    console.warn(
+      `[syncEngine] captureDailyStatsSnapshot failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }

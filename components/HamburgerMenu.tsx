@@ -52,6 +52,9 @@ export default function HamburgerMenu() {
           <a href="/removed" role="menuitem" className="hamburger-menu__item">
             Removed items
           </a>
+          <a href="/statistics" role="menuitem" className="hamburger-menu__item">
+            Statistics
+          </a>
         </nav>
       )}
     </div>
