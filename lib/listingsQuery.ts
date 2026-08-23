@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { findNearestStation } from "./nearestStation";
 import type { Listing } from "./types";
 
 interface ListingRow {
@@ -21,6 +22,8 @@ interface ListingRow {
   is_new_build: boolean;
   postcode: string | null;
   area: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
 // This used to request an explicit, generous `.range(0, 4999)` in one shot,
@@ -51,7 +54,7 @@ async function fetchAllActiveListingRows(
     const { data, error } = await client
       .from("listings")
       .select(
-        "source_id, source_type, external_id, title, price, price_value, price_range, url, images, main_image, bedrooms, bedroom_type, bathrooms, parking, floor, tenure, is_new_build, postcode, area"
+        "source_id, source_type, external_id, title, price, price_value, price_range, url, images, main_image, bedrooms, bedroom_type, bathrooms, parking, floor, tenure, is_new_build, postcode, area, lat, lng"
       )
       .eq("active", true)
       .order("last_seen_at", { ascending: false })
@@ -116,6 +119,11 @@ export async function fetchActiveListings(
     isNewBuild: r.is_new_build,
     postcode: r.postcode ?? "",
     area: r.area ?? "",
+    lat: r.lat,
+    lng: r.lng,
+    // Real distance to the real nearest station (lib/nearestStation.ts),
+    // only when this listing has real coordinates — never guessed.
+    nearestStation: r.lat != null && r.lng != null ? findNearestStation({ lat: r.lat, lng: r.lng }) : null,
   }));
 
   return { listings, error: null };

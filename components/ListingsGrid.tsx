@@ -111,6 +111,11 @@ export default function ListingsGrid({
               )}
               <span>{l.tenure ? TENURE_LABELS[l.tenure] : "Tenure not stated"}</span>
             </div>
+            {l.nearestStation && (
+              <div className="listing-card__station">
+                <span aria-hidden="true">🚉</span> {l.nearestStation.name} station · {l.nearestStation.distanceMiles} mi
+              </div>
+            )}
             <div className="listing-card__footer">
               <span className="listing-card__area">
                 {l.area}

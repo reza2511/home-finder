@@ -96,6 +96,15 @@ export interface Listing {
   isNewBuild: boolean;
   postcode: string;
   area: string;
+  /** Real coordinates derived from `postcode` via postcodes.io
+   * (lib/geocoding.ts) — null when there's no postcode, or postcodes.io
+   * didn't recognise it. Never guessed. */
+  lat?: number | null;
+  lng?: number | null;
+  /** The real station nearest to `lat`/`lng`, with its real straight-line
+   * distance (lib/nearestStation.ts) — null whenever `lat`/`lng` is null,
+   * never a guessed station. */
+  nearestStation?: { name: string; distanceMiles: number } | null;
 }
 
 /** A listing that has gone inactive (vanished from its source during a

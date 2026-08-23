@@ -1,5 +1,6 @@
 import { requireSupabaseAdmin } from "./db";
 import { recordRemovedFavourites } from "./favouritesStore";
+import { geocodePostcodes } from "./geocoding";
 import type { AdapterListing } from "./adapters/types";
 import type { SourceType } from "./types";
 
@@ -69,39 +70,50 @@ export async function upsertListingsForSource(
   const now = new Date().toISOString();
 
   if (incoming.length > 0) {
-    const rows = incoming.map((listing) => ({
-      source_id: sourceId,
-      external_id: listing.externalId,
-      title: listing.title,
-      price: listing.price,
-      price_value: listing.priceValue,
-      price_range: listing.priceRange ?? null,
-      url: listing.url,
-      images: listing.images ?? [],
-      main_image: listing.mainImage,
-      bedrooms: listing.bedrooms,
-      bedroom_type: listing.bedroomType,
-      bathrooms: listing.bathrooms ?? null,
-      parking: listing.parking ?? null,
-      floor: listing.floor ?? null,
-      tenure: listing.tenure,
-      is_new_build: listing.isNewBuild,
-      postcode: listing.postcode,
-      area: listing.area,
-      source_type: sourceType,
-      last_seen_at: now,
-      active: true,
-      // A listing that reappears after previously going inactive is no
-      // longer "removed" — clear any removed_at it was carrying so it
-      // doesn't linger on the Removed items page.
-      removed_at: null,
-      // first_seen_at deliberately omitted from every row: on INSERT the
-      // column's own `default now()` fills it; on UPDATE (conflict),
-      // leaving it out of the payload means the ON CONFLICT DO UPDATE
-      // Postgres generates never touches that column, so a listing's
-      // original first-seen timestamp survives every re-sync rather than
-      // being reset just because it was seen again.
-    }));
+    // Real coordinates, derived from each listing's own real postcode via
+    // postcodes.io (lib/geocoding.ts) — never invented. A postcode that
+    // doesn't resolve (or is blank) just means that listing gets no
+    // coordinates, same as any other "source doesn't state it" field here.
+    const coordsByPostcode = await geocodePostcodes(incoming.map((l) => l.postcode).filter(Boolean));
+
+    const rows = incoming.map((listing) => {
+      const coords = listing.postcode ? coordsByPostcode.get(listing.postcode.trim()) : undefined;
+      return {
+        source_id: sourceId,
+        external_id: listing.externalId,
+        title: listing.title,
+        price: listing.price,
+        price_value: listing.priceValue,
+        price_range: listing.priceRange ?? null,
+        url: listing.url,
+        images: listing.images ?? [],
+        main_image: listing.mainImage,
+        bedrooms: listing.bedrooms,
+        bedroom_type: listing.bedroomType,
+        bathrooms: listing.bathrooms ?? null,
+        parking: listing.parking ?? null,
+        floor: listing.floor ?? null,
+        tenure: listing.tenure,
+        is_new_build: listing.isNewBuild,
+        postcode: listing.postcode,
+        area: listing.area,
+        lat: coords?.lat ?? null,
+        lng: coords?.lng ?? null,
+        source_type: sourceType,
+        last_seen_at: now,
+        active: true,
+        // A listing that reappears after previously going inactive is no
+        // longer "removed" — clear any removed_at it was carrying so it
+        // doesn't linger on the Removed items page.
+        removed_at: null,
+        // first_seen_at deliberately omitted from every row: on INSERT the
+        // column's own `default now()` fills it; on UPDATE (conflict),
+        // leaving it out of the payload means the ON CONFLICT DO UPDATE
+        // Postgres generates never touches that column, so a listing's
+        // original first-seen timestamp survives every re-sync rather than
+        // being reset just because it was seen again.
+      };
+    });
 
     const { error: upsertErr } = await admin
       .from("listings")
