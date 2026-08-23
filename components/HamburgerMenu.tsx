@@ -55,6 +55,9 @@ export default function HamburgerMenu() {
           <a href="/statistics" role="menuitem" className="hamburger-menu__item">
             Statistics
           </a>
+          <a href="/postcode-map" role="menuitem" className="hamburger-menu__item">
+            Postcode map
+          </a>
         </nav>
       )}
     </div>

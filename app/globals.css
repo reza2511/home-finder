@@ -1466,3 +1466,124 @@ button {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Postcode map page ---------- */
+
+.postcode-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .postcode-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.postcode-layout__map {
+  min-width: 0;
+}
+
+.postcode-map,
+.postcode-map--loading {
+  height: 640px;
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.postcode-map--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  background: var(--color-surface);
+}
+
+@media (max-width: 640px) {
+  .postcode-map,
+  .postcode-map--loading {
+    height: 440px;
+  }
+}
+
+/* District code labels — plain text, no Leaflet tooltip chrome (box/
+   border/arrow), hidden until zoomed in enough to actually read them
+   (toggled by PostcodeMap's ZoomLabelToggle via the
+   postcode-map--labels-visible class on the map container). */
+.postcode-map:not(.postcode-map--labels-visible) .leaflet-tooltip.postcode-map__label {
+  display: none;
+}
+
+/* Leaflet's own leaflet.css (imported inside PostcodeMap.tsx, so it can
+   land after this stylesheet in the cascade) gives .leaflet-tooltip a
+   white box/border/shadow at equal (single-class) specificity — pairing
+   both classes on every selector here, rather than just
+   .postcode-map__label alone, is what actually guarantees this wins
+   regardless of import order. */
+.leaflet-tooltip.postcode-map__label {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1c2233;
+  text-shadow:
+    0 0 3px #fff,
+    0 0 3px #fff,
+    0 0 3px #fff;
+}
+
+.leaflet-tooltip.postcode-map__label::before {
+  display: none;
+}
+
+.postcode-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.postcode-panel__hint {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.postcode-panel__code {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.postcode-panel__area {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 2px 0 14px;
+}
+
+.postcode-panel__count {
+  font-size: 14px;
+}
+
+.postcode-panel__count strong {
+  font-size: 22px;
+  margin-right: 6px;
+}
+
+.postcode-attribution {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 14px;
+  line-height: 1.6;
+}
+
+.postcode-attribution a {
+  color: var(--color-text-muted);
+  text-decoration: underline;
+}
