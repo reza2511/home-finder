@@ -43,7 +43,7 @@ import { discoverCandidateUrls } from "./urlDiscovery";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure, isExclusivelySharedOwnershipProvider } from "./tenureDetection";
 import { detectIsNewBuild } from "./newBuildDetection";
-import { getSharedBrowser } from "./browser";
+import { withBrowser } from "./browser";
 
 const FETCH_TIMEOUT_MS = 15_000;
 // domcontentloaded rather than load/networkidle: many sites never go fully
@@ -188,39 +188,41 @@ async function blockHeavyResources(page: import("playwright-core").Page): Promis
 async function renderOnce(url: string): Promise<{ html: string; priceSelectorMatched: boolean }> {
   const release = await acquireRenderSlot();
   try {
-    const browser = await getSharedBrowser();
-    const context = await browser.newContext({
-      userAgent: USER_AGENT,
-      viewport: { width: 1366, height: 900 },
-      locale: "en-GB",
-      extraHTTPHeaders: { "Accept-Language": "en-GB,en;q=0.9" },
-    });
-    const page = await context.newPage();
-    try {
-      await blockHeavyResources(page);
-
-      // domcontentloaded rather than load/networkidle — see GOTO_TIMEOUT_MS
-      // comment above for why waiting for network silence was the direct
-      // cause of most render timeouts.
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
-
-      // The DOM being attached doesn't mean the listing content has
-      // rendered yet (client-side data fetch/hydration). Explicitly wait for
-      // a price-like element rather than assuming readiness — a miss here
-      // is logged, not thrown, since the page may just genuinely have none.
-      let priceSelectorMatched = true;
+    return await withBrowser(async (browser) => {
+      const context = await browser.newContext({
+        userAgent: USER_AGENT,
+        viewport: { width: 1366, height: 900 },
+        locale: "en-GB",
+        extraHTTPHeaders: { "Accept-Language": "en-GB,en;q=0.9" },
+      });
+      const page = await context.newPage();
       try {
-        await page.waitForSelector("text=/£\\s?\\d/", { timeout: PRICE_SELECTOR_TIMEOUT_MS });
-      } catch {
-        priceSelectorMatched = false;
-        console.warn(`[autoAdapter] no £-price element appeared on ${url} within ${PRICE_SELECTOR_TIMEOUT_MS}ms`);
-      }
+        await blockHeavyResources(page);
 
-      const html = await page.content();
-      return { html, priceSelectorMatched };
-    } finally {
-      await context.close();
-    }
+        // domcontentloaded rather than load/networkidle — see GOTO_TIMEOUT_MS
+        // comment above for why waiting for network silence was the direct
+        // cause of most render timeouts.
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
+
+        // The DOM being attached doesn't mean the listing content has
+        // rendered yet (client-side data fetch/hydration). Explicitly wait
+        // for a price-like element rather than assuming readiness — a miss
+        // here is logged, not thrown, since the page may just genuinely
+        // have none.
+        let priceSelectorMatched = true;
+        try {
+          await page.waitForSelector("text=/£\\s?\\d/", { timeout: PRICE_SELECTOR_TIMEOUT_MS });
+        } catch {
+          priceSelectorMatched = false;
+          console.warn(`[autoAdapter] no £-price element appeared on ${url} within ${PRICE_SELECTOR_TIMEOUT_MS}ms`);
+        }
+
+        const html = await page.content();
+        return { html, priceSelectorMatched };
+      } finally {
+        await context.close();
+      }
+    });
   } finally {
     release();
   }

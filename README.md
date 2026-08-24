@@ -73,9 +73,12 @@ first load.
   source. `sync_status.deduped_count` records how many were dropped per run.
 - **Browser-based adapters** (`lib/adapters/browser.ts`): every adapter that
   needs a real rendered page (autoAdapter, Ballymore, Berkeley, Fairview,
-  L&Q, Peabody, Redrow, 1newhomes, Benhams) shares one lazily-launched
-  Chromium instance via
-  `getSharedBrowser()` instead of each launching its own. Locally this
+  L&Q, Peabody, Redrow, 1newhomes, Benhams, and several more) gets its own
+  dedicated Chromium instance via `withBrowser()` — launched fresh for that
+  one call and always closed before returning, never shared with another
+  source (2026-08-24: a shared, never-closed instance let two overlapping
+  syncs crash each other's browser mid-run — see `lib/syncLock.ts`, which
+  now also stops syncs from overlapping in the first place). Locally this
   resolves the Chromium `playwright` (a devDependency, only used to populate
   the local browser cache) downloaded; on Vercel (`process.env.VERCEL` is
   set) it launches `@sparticuz/chromium`'s serverless-compiled binary via
@@ -84,6 +87,13 @@ first load.
   `next.config.js` (`serverComponentsExternalPackages` /
   `outputFileTracingIncludes`) for the two build-time steps that make the
   binary actually ship with the deployed function.
+- **Single sync at a time** (`lib/syncLock.ts`): a one-row DB table
+  (`supabase/migrations/0011_sync_lock.sql`) makes sure only one sync — the
+  GitHub Actions daily run or the Vercel "Run sync now" button — is ever
+  running at once. Whichever one asks second while the lock is held gets a
+  clear rejection instead of running concurrently; a lock older than 6 hours
+  is treated as abandoned (a crashed process that never released it) so it
+  can never wedge every future sync.
 - **API**:
   - `GET /api/status` — every `sync_status` row (with `stale` derived) plus a
     summary count per status.

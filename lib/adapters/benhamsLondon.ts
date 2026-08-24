@@ -95,7 +95,7 @@ import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } fro
 import { isBotBlockSignal } from "./blockDetection";
 import { postcodeAreaIsLondon, UK_OUTWARD_CODE_RE } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
-import { getSharedBrowser } from "./browser";
+import { withBrowser } from "./browser";
 
 const SOURCE_ID = "benhams-london";
 const TARGET_URL = "https://www.benhams.com/london/";
@@ -224,7 +224,10 @@ export const benhamsLondonAdapter: SourceAdapter = {
   name: "Benhams London",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getSharedBrowser();
+    // Own browser instance for this one call, always closed after — see
+    // lib/adapters/browser.ts's own doc comment for why this replaced a
+    // shared, never-closed singleton.
+    return withBrowser(async (browser) => {
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -359,5 +362,6 @@ export const benhamsLondonAdapter: SourceAdapter = {
     } finally {
       await context.close();
     }
+    });
   },
 };

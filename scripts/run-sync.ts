@@ -13,42 +13,43 @@
  * access to run this workflow / these secrets, not an anonymous HTTP
  * request.
  *
- * Sequencing: production (app/api/sync/route.ts) runs every direct-
- * developer adapter concurrently (Promise.all) and only second-phase
- * (aggregator/estate-agent) adapters sequentially — see runAllAdapters()'s
- * own doc comment in lib/syncEngine.ts. On a shared GitHub Actions runner
- * (2 vCPUs), running several Playwright Chromium renders at once is a much
- * bigger resource risk than on Vercel, so this script instead calls
- * runAllAdapters() once per source, one at a time — direct-developer
- * adapters first (to completion), then second-phase ones — preserving the
- * same "all direct before any second-phase" ordering runAllAdapters()
- * itself relies on for correct cross-source dedup, just with direct
- * adapters serialized too instead of run via Promise.all.
+ * Sequencing: runAllAdapters() (lib/syncEngine.ts) itself now runs every
+ * adapter — direct-developer or second-phase — strictly one at a time, the
+ * same on Vercel (app/api/sync/route.ts) as here; see that function's own
+ * doc comment for why. This script calls it once per source anyway (rather
+ * than once for the whole list) purely to get an independent retry and an
+ * outer, script-level timeout per source (OUTER_TIMEOUT_MS below) — not to
+ * impose sequencing that the engine no longer already guarantees on its
+ * own.
  *
  * No per-source caps are loosened by this: ADAPTER_TIMEOUT_MS and
  * MAX_CONCURRENT_RENDERS (lib/syncEngine.ts / lib/adapters/autoAdapter.ts)
  * and every adapter's own per-page/per-source limits apply exactly as they
- * do in production — this script only changes the order/concurrency in
- * which sources are handed to the existing runAllAdapters(). It ADDS one
- * extra, script-level per-source timeout on top (OUTER_TIMEOUT_MS below) —
- * see its own comment for why.
+ * do in production — this script only changes the order in which sources
+ * are handed to the existing runAllAdapters(). It ADDS one extra, script-
+ * level per-source timeout on top (OUTER_TIMEOUT_MS below) — see its own
+ * comment for why.
+ *
+ * Single sync at a time (2026-08-24): the whole run is wrapped in
+ * lib/syncLock.ts's DB-backed lock (acquired once here, for the entire
+ * run — never per-source, which would leave real gaps between sources for
+ * a second sync to slip into) — see that file's own doc comment for the
+ * collision it exists to prevent. A run that finds the lock already held
+ * (the Vercel button, or a second overlapping GitHub Actions run) logs why
+ * and exits 0 immediately rather than running anything — this is an
+ * intentional, successful no-op, not a failure.
  *
  * Process lifetime (2026-08-23): a run that completed all its actual sync
  * work was still taking 90+ minutes in GitHub Actions and hanging instead
- * of exiting — the shared Playwright Chromium instance
- * (lib/adapters/browser.ts's getSharedBrowser(), deliberately never closed
- * by production code, since staying warm across invocations is the point
- * there — see that file's header) keeps a live connection to its browser
- * subprocess open, which keeps Node's event loop alive indefinitely once
- * nothing else is scheduled. Two fixes, both here rather than in
- * browser.ts/syncEngine.ts, so Vercel's production behaviour (which relies
- * on the browser staying warm) is untouched:
- *   1. closeSharedBrowser() in the `finally` below — closes it if the run
- *      ever launched one.
- *   2. An explicit process.exit() call at the very end, after that close
- *      and every DB write have already happened — a backstop in case
- *      anything else (a stray timer, an open socket) would otherwise have
- *      kept the process alive regardless.
+ * of exiting — the (then-)shared Playwright Chromium instance kept a live
+ * connection to its browser subprocess open, which keeps Node's event loop
+ * alive indefinitely once nothing else is scheduled. lib/adapters/
+ * browser.ts no longer shares one browser across sources at all (see that
+ * file's header) — every adapter closes its own the moment it's done —
+ * so nothing should be left running by the time this reaches its end
+ * regardless. The explicit process.exit() call below stays anyway, as a
+ * backstop in case anything else (a stray timer, an open socket) would
+ * otherwise keep the process alive.
  *
  * Exit code (2026-08-23): a real run reported "17/18 sources ran without a
  * script-level error" and still exited non-zero, failing the whole GitHub
@@ -77,7 +78,7 @@
 import { runAllAdapters, ADAPTER_TIMEOUT_MS } from "../lib/syncEngine";
 import { adapters } from "../lib/adapters";
 import { isSecondPhaseSource } from "../lib/developers";
-import { closeSharedBrowser } from "../lib/adapters/browser";
+import { acquireSyncLock, releaseSyncLock, lockedMessage } from "../lib/syncLock";
 
 // The engine's own per-adapter timeout (lib/syncEngine.ts) already bounds
 // a single source's run and records a proper `error`/`blocked` sync_status
@@ -88,9 +89,9 @@ import { closeSharedBrowser } from "../lib/adapters/browser";
 // inner timeout entirely (e.g. a native call that ignores its own timeout
 // option) — without it, that single source could otherwise hang this
 // script forever, since a timed-out *promise* here doesn't cancel whatever
-// underlying work it was waiting on; only closeSharedBrowser() (which
-// tears down the actual browser subprocess) and the final process.exit()
-// can actually force that work to stop.
+// underlying work it was waiting on; only that source's own browser being
+// closed (lib/adapters/browser.ts's withBrowser(), in its own `finally`)
+// and the final process.exit() below can actually force that work to stop.
 const OUTER_TIMEOUT_MS = ADAPTER_TIMEOUT_MS + 120_000;
 
 // One retry, after a short pause — sized for a transient blip (a fresh
@@ -188,6 +189,17 @@ async function main(): Promise<number> {
 }
 
 async function run(): Promise<void> {
+  // Only one sync — this GitHub Actions run, or the Vercel "Run sync now"
+  // button — may ever run at once. See lib/syncLock.ts's own doc comment
+  // for the collision this exists to prevent. Acquired ONCE here, for the
+  // entire run (every source, not per-source) — see the file header's
+  // "Single sync at a time" note for why that scope matters.
+  const lock = await acquireSyncLock("github-actions");
+  if (!lock.acquired) {
+    console.log(`[run-sync] Skipping this run — ${lockedMessage(lock.heldBy)}`);
+    process.exit(0);
+  }
+
   let exitCode = 0;
   try {
     exitCode = await main();
@@ -198,10 +210,7 @@ async function run(): Promise<void> {
     console.error("[run-sync] Fatal error:", err);
     exitCode = 1;
   } finally {
-    // Always runs, success or failure — see the file header's "Process
-    // lifetime" note for why this (and the process.exit() below) exist.
-    await closeSharedBrowser();
-    console.log("[run-sync] Closed the shared browser (if one was launched).");
+    await releaseSyncLock(lock.token);
   }
 
   // All DB writes (including this run's own sync_status/stats rows) have

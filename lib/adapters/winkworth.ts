@@ -98,7 +98,7 @@ import { isBotBlockSignal } from "./blockDetection";
 import { detectTenure } from "./tenureDetection";
 import { hasExplicitNewBuildSignal } from "./newBuildDetection";
 import { trustsAsNewBuild } from "../developers";
-import { getSharedBrowser } from "./browser";
+import { withBrowser } from "./browser";
 
 const SOURCE_ID = "winkworth";
 const BASE_URL = "https://www.winkworth.co.uk";
@@ -193,7 +193,10 @@ export const winkworthAdapter: SourceAdapter = {
   name: "Winkworth",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getSharedBrowser();
+    // Own browser instance for this one call, always closed after — see
+    // lib/adapters/browser.ts's own doc comment for why this replaced a
+    // shared, never-closed singleton.
+    return withBrowser(async (browser) => {
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -366,5 +369,6 @@ export const winkworthAdapter: SourceAdapter = {
     } finally {
       await context.close();
     }
+    });
   },
 };

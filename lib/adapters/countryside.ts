@@ -57,7 +57,7 @@ import { AdapterHttpError, AdapterListing, AdapterRunResult, SourceAdapter } fro
 import { isBotBlockSignal } from "./blockDetection";
 import { detectTenure } from "./tenureDetection";
 import { detectIsNewBuild } from "./newBuildDetection";
-import { getSharedBrowser } from "./browser";
+import { withBrowser } from "./browser";
 
 const CSV_URL = "https://www.countrysidehomes.com/data/developments/csv";
 const GOTO_TIMEOUT_MS = 60_000;
@@ -152,7 +152,10 @@ export const countrysideAdapter: SourceAdapter = {
   name: "Vistry / Countryside Partnerships",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getSharedBrowser();
+    // Own browser instance for this one call, always closed after — see
+    // lib/adapters/browser.ts's own doc comment for why this replaced a
+    // shared, never-closed singleton.
+    return withBrowser(async (browser) => {
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -250,5 +253,6 @@ export const countrysideAdapter: SourceAdapter = {
     } finally {
       await context.close();
     }
+    });
   },
 };

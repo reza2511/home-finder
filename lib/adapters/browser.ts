@@ -1,11 +1,37 @@
 /**
- * Shared serverless-compatible Chromium launcher — every Playwright-based
- * adapter (autoAdapter.ts, ballymore.ts, berkeley.ts, fairviewNewHomes.ts,
- * lqHomes.ts, peabodyNewHomes.ts) calls getSharedBrowser() here instead of
- * each launching and keeping alive its own separate browser process. Same
+ * Serverless-compatible Chromium launcher — every Playwright-based adapter
+ * (autoAdapter.ts, ballymore.ts, berkeley.ts, fairviewNewHomes.ts,
+ * lqHomes.ts, peabodyNewHomes.ts) calls withBrowser() here to get one. Same
  * adapters, same extraction logic, same "no fake data" rules throughout —
  * this file only changes how (and where) the underlying Chromium process
- * gets started.
+ * gets started and torn down.
+ *
+ * One browser instance per call, never shared, always closed (2026-08-24):
+ * this used to hand out a single, lazily-launched Chromium instance shared
+ * across every adapter AND across every invocation of the whole sync
+ * (deliberately never closed, to stay warm on Vercel) via a `globalThis`-
+ * cached promise. That meant every source, in every concurrently-running
+ * sync, was making calls against the exact same underlying browser
+ * process. Two overlapping syncs (a GitHub Actions run and a manual
+ * "Run sync now" click) raced on it and crashed each other mid-run —
+ * several sources failed within moments of each other with "browser.
+ * newContext: Target page, context or browser has been closed", and Redrow
+ * lost its listings entirely as fallout, once its own upsert ran against
+ * an adapter result that had been corrupted by the crash.
+ *
+ * lib/syncLock.ts now makes that specific collision impossible (only one
+ * sync ever runs at all), but a shared, unkillable, never-closed browser
+ * was always the wrong shape regardless — one source's browser crashing
+ * (or a slow one still using it) should never be able to take down every
+ * other source's scrape, in the same run or a different one. withBrowser()
+ * below launches a fresh Chromium instance for exactly one call and closes
+ * it in a `finally` before returning — full isolation, no shared mutable
+ * state, and nothing left running for a later call to collide with. The
+ * cost is real (N sources launching Chromium sequentially is slower than
+ * one warm shared instance), but correctness comes first here; see
+ * lib/syncEngine.ts's runAllAdapters() for why every source — direct-
+ * developer or second-phase — now also runs strictly one at a time rather
+ * than several in parallel sharing render capacity.
  *
  * Two real environments this has to work in:
  *
@@ -32,20 +58,8 @@
  *    together with the launch args that environment actually needs
  *    (no-sandbox, single-process, etc.). This is the officially documented
  *    Playwright usage pattern from @sparticuz/chromium's own README.
- *
- * A single browser instance is shared across every adapter that calls
- * this — multiple independent contexts/pages on one browser is exactly
- * what Playwright is designed for, and running one Chromium process
- * instead of six (one per adapter file, as this app used to do) matters a
- * lot more on a memory-capped serverless function than it did on a dev
- * machine.
  */
 import type { Browser } from "playwright-core";
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __sharedBrowser: Promise<Browser> | undefined;
-}
 
 const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"];
 
@@ -67,43 +81,29 @@ async function launchBrowser(): Promise<Browser> {
   return chromium.launch({ headless: true, args: LAUNCH_ARGS });
 }
 
-/** Returns a single, shared, lazily-launched Chromium instance. Every
- * Playwright-based adapter should call this instead of launching its own
- * browser — see file header. */
-export function getSharedBrowser(): Promise<Browser> {
-  if (!globalThis.__sharedBrowser) {
-    globalThis.__sharedBrowser = launchBrowser();
-  }
-  return globalThis.__sharedBrowser;
-}
-
 /**
- * Closes the shared Chromium instance and clears the cached promise, if one
- * was ever launched — a no-op otherwise. An open Playwright `Browser` keeps
- * a live connection to its browser subprocess, which keeps Node's event
- * loop alive indefinitely; a short-lived process that's genuinely done
- * needs this called before it can exit on its own (see
- * scripts/run-sync.ts, which also force-exits afterwards as a backstop).
- *
- * Deliberately never called from any Vercel-facing route or from
- * lib/syncEngine.ts itself — keeping the browser warm across invocations
- * within the same warm serverless instance is the whole point of the
- * shared singleton there (see this file's own header); closing it after
- * every sync would defeat that.
+ * Launches a fresh, dedicated Chromium instance, hands it to `fn`, and
+ * guarantees it's closed — success, thrown error, or timeout — before
+ * returning or rethrowing. Every Playwright-based adapter should call this
+ * instead of launching its own browser ad hoc, so "one browser per call,
+ * always closed" stays true everywhere rather than being each adapter's
+ * own responsibility to remember. See file header for why this replaced
+ * the old shared/never-closed singleton.
  */
-export async function closeSharedBrowser(): Promise<void> {
-  const pending = globalThis.__sharedBrowser;
-  if (!pending) return;
-  globalThis.__sharedBrowser = undefined;
+export async function withBrowser<T>(fn: (browser: Browser) => Promise<T>): Promise<T> {
+  const browser = await launchBrowser();
   try {
-    const browser = await pending;
-    await browser.close();
-  } catch (err) {
-    // Best-effort — the caller is about to force-exit the process anyway
-    // (see scripts/run-sync.ts), so a browser that's already gone or
-    // refuses to close cleanly isn't worth failing the run over.
-    console.warn(
-      `[browser] closeSharedBrowser: failed to close cleanly (non-fatal): ${err instanceof Error ? err.message : String(err)}`
-    );
+    return await fn(browser);
+  } finally {
+    try {
+      await browser.close();
+    } catch (err) {
+      // Best-effort — a browser that's already gone or refuses to close
+      // cleanly isn't worth failing an otherwise-successful adapter run
+      // over.
+      console.warn(
+        `[browser] withBrowser: failed to close cleanly (non-fatal): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 }

@@ -86,7 +86,7 @@ import { extractWithAi, type RawExtractedItem } from "./autoAdapter";
 import { postcodeAreaIsLondon } from "./londonPostcodes";
 import { detectTenure } from "./tenureDetection";
 import { detectIsNewBuild } from "./newBuildDetection";
-import { getSharedBrowser } from "./browser";
+import { withBrowser } from "./browser";
 
 const TARGET_URL =
   "https://www.berkeleygroup.co.uk/search-results?location=London%2C%20England&bedrooms=&propertyType=&price=";
@@ -290,7 +290,10 @@ export const berkeleyAdapter: SourceAdapter = {
   name: "Berkeley Group",
 
   async run(): Promise<AdapterRunResult> {
-    const browser = await getSharedBrowser();
+    // Own browser instance for this one call, always closed after — see
+    // lib/adapters/browser.ts's own doc comment for why this replaced a
+    // shared, never-closed singleton.
+    return withBrowser(async (browser) => {
     const context = await browser.newContext({
       userAgent: USER_AGENT,
       viewport: { width: 1366, height: 900 },
@@ -576,5 +579,6 @@ export const berkeleyAdapter: SourceAdapter = {
     } finally {
       await context.close();
     }
+    });
   },
 };

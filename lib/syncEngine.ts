@@ -230,22 +230,33 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
  * Direct-developer adapters always run to completion BEFORE any second-phase
  * adapter (aggregator or estate-agent — see isSecondPhaseSource) starts —
  * dedupe.ts needs the complete, freshly-synced set of direct listings
- * already in Supabase to correctly drop duplicates. Direct-developer
- * adapters themselves still run concurrently (Promise.all) among each
- * other — they never dedupe against one another, so there's no ordering
- * requirement there.
+ * already in Supabase to correctly drop duplicates.
  *
- * Second-phase adapters, however, run SEQUENTIALLY (one at a time, not
- * Promise.all) — 2026-08: changed from concurrent, because
- * dedupeAgainstActiveListings now checks a second-phase source's listings
- * against every OTHER second-phase source too, not just direct developers
- * (e.g. the two Benhams pages against each other). That only works if each
- * one fully finishes (including its own write to Supabase) before the next
- * one's dedupe query runs — running them concurrently would let two
- * overlapping sources' dedupe queries race each other's writes and silently
- * keep both copies of the same real listing. The real cost is a longer
- * total second-phase runtime (no longer parallelized); accepted as the
- * price of correct cross-source dedup.
+ * Every adapter — direct or second-phase — now runs SEQUENTIALLY, one at a
+ * time, never Promise.all'd against another. Two reasons stacked on top of
+ * each other:
+ *   1. (2026-08, second-phase only, originally) dedupeAgainstActiveListings
+ *      checks a second-phase source's listings against every OTHER
+ *      second-phase source too, not just direct developers (e.g. the two
+ *      Benhams pages against each other). That only works if each one
+ *      fully finishes (including its own write to Supabase) before the
+ *      next one's dedupe query runs — concurrent second-phase sources
+ *      would let two overlapping dedupe queries race each other's writes
+ *      and silently keep both copies of the same real listing.
+ *   2. (2026-08-24, extended to direct-developer adapters too) each
+ *      adapter now launches and closes its own dedicated Playwright
+ *      browser (lib/adapters/browser.ts's withBrowser()) rather than
+ *      sharing one — full isolation between sources either way, but
+ *      running every Playwright-based adapter one at a time instead of
+ *      several concurrently also keeps this from launching a pile of
+ *      simultaneous Chromium processes on a resource-capped runner, on top
+ *      of being the simpler, more predictable model now that lib/
+ *      syncLock.ts guarantees only one whole sync is running at all —
+ *      speed was the only reason for concurrency here, and reliability
+ *      matters more.
+ * The real cost is a longer total runtime (nothing here is parallelized
+ * anymore); accepted as the price of correct cross-source dedup and of a
+ * collision in one source never being able to cascade into others.
  *
  * Refresh history (lib/historyStore.ts) is no longer tied to a sync run at
  * all — it's captured on a fixed daily schedule (Vercel Cron) or on demand
@@ -257,7 +268,9 @@ export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
   const directTargets = targets.filter((a) => !isSecondPhaseSource(a.id));
   const secondPhaseTargets = targets.filter((a) => isSecondPhaseSource(a.id));
 
-  await Promise.all(directTargets.map((adapter) => runOne(adapter)));
+  for (const adapter of directTargets) {
+    await runOne(adapter);
+  }
   for (const adapter of secondPhaseTargets) {
     await runOne(adapter);
   }

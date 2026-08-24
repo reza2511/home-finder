@@ -19,7 +19,7 @@
  *    reported as `status: "blocked"` / `"error"` with an honest message, so
  *    the comparison table can show "Could not read" instead of faking a row.
  */
-import { getSharedBrowser } from "./adapters/browser";
+import { withBrowser } from "./adapters/browser";
 import { isBotBlockSignal } from "./adapters/blockDetection";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -83,24 +83,28 @@ function looksJsRendered(html: string): boolean {
 }
 
 async function renderWithPlaywright(url: string): Promise<string> {
-  const browser = await getSharedBrowser();
-  const context = await browser.newContext({
-    userAgent: USER_AGENT,
-    viewport: { width: 1366, height: 900 },
-    locale: "en-GB",
-    extraHTTPHeaders: { "Accept-Language": "en-GB,en;q=0.9" },
+  // Own browser instance for this one call, always closed after — see
+  // lib/adapters/browser.ts's own doc comment for why this replaced a
+  // shared, never-closed singleton.
+  return withBrowser(async (browser) => {
+    const context = await browser.newContext({
+      userAgent: USER_AGENT,
+      viewport: { width: 1366, height: 900 },
+      locale: "en-GB",
+      extraHTTPHeaders: { "Accept-Language": "en-GB,en;q=0.9" },
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
+      // A real listing page's price/details are frequently injected client-side
+      // after the initial DOM — give it a beat before reading content, same
+      // "domcontentloaded then a short settle" approach the sync's adapters use.
+      await page.waitForTimeout(1500);
+      return await page.content();
+    } finally {
+      await context.close();
+    }
   });
-  try {
-    const page = await context.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
-    // A real listing page's price/details are frequently injected client-side
-    // after the initial DOM — give it a beat before reading content, same
-    // "domcontentloaded then a short settle" approach the sync's adapters use.
-    await page.waitForTimeout(1500);
-    return await page.content();
-  } finally {
-    await context.close();
-  }
 }
 
 interface PageContentResult {

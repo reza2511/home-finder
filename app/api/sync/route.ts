@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runAllAdapters } from "@/lib/syncEngine";
 import { isAuthenticated } from "@/lib/auth";
+import { acquireSyncLock, releaseSyncLock, lockedMessage } from "@/lib/syncLock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,8 +34,23 @@ export async function POST(request: Request) {
     ? idsParam.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
 
+  // Only one sync (this button, or the GitHub Actions daily run) may ever
+  // run at once — see lib/syncLock.ts's own doc comment for why: two
+  // overlapping syncs previously raced on the same in-process Playwright
+  // browser and crashed each other mid-run. A second click (or a click
+  // while the scheduled run is in progress) is rejected outright rather
+  // than queued or run concurrently.
+  const lock = await acquireSyncLock("vercel-manual");
+  if (!lock.acquired) {
+    return NextResponse.json({ error: lockedMessage(lock.heldBy) }, { status: 409 });
+  }
+
   const startedAt = Date.now();
-  await runAllAdapters(ids);
+  try {
+    await runAllAdapters(ids);
+  } finally {
+    await releaseSyncLock(lock.token);
+  }
   return NextResponse.json({
     ok: true,
     ranAt: new Date().toISOString(),
