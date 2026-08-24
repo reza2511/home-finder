@@ -163,6 +163,7 @@ export default function AppShell() {
             <RefreshHistory
               activeSnapshotId={historySnapshot?.id ?? null}
               onSelect={setHistorySnapshot}
+              onDeleted={() => setHistorySnapshot(null)}
             />
           </aside>
 

@@ -266,6 +266,21 @@ button {
   width: 260px;
   position: sticky;
   top: 84px; /* clears the sticky header */
+  /* A sticky element taller than the remaining viewport doesn't just push
+     content off-screen reachable by scrolling the page — on Safari
+     (confirmed on both macOS and iOS) a sticky flex item with no height/
+     overflow of its own gets its extra content silently clipped instead,
+     with no way to reach it at all (the bug this fixes: on a shorter
+     screen, only the Refresh History section's first entry was visible
+     and the rest were simply gone, not just off-screen). Capping the
+     sidebar's own height to whatever room is actually left below the
+     sticky header and giving it its own scrollbar means it's *always*
+     reachable, on every browser, whether or not its content happens to
+     fit. A no-op on a tall enough screen — overflow-y: auto only ever
+     shows a scrollbar once content actually exceeds max-height. */
+  max-height: calc(100vh - 84px - 24px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch; /* momentum scrolling for this sidebar's own scroll on iOS Safari */
 }
 
 .page-main {
@@ -281,6 +296,12 @@ button {
   .page-sidebar {
     width: 100%;
     position: static;
+    /* No longer sticky at this width, so nothing here can clip against the
+       viewport the way the note above describes — let it size to its own
+       content and scroll with the rest of the page, same as everything
+       else in .page-layout once it's a normal column. */
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
@@ -620,6 +641,12 @@ button {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Same self-contained scroll as .dev-filter__list above — the list is
+     reachable in full on its own, regardless of what any ancestor
+     (the sticky sidebar included) does with overflow on a given browser. */
+  max-height: 280px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .refresh-history__row {
@@ -676,6 +703,29 @@ button {
   color: var(--color-primary);
 }
 
+.refresh-history__delete {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.refresh-history__delete:hover:not(:disabled) {
+  border-color: var(--color-danger-dot);
+  color: var(--color-danger-text);
+}
+
+.refresh-history__delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .refresh-history__tooltip {
   display: none;
   position: absolute;
@@ -683,6 +733,13 @@ button {
   right: 0;
   z-index: 20;
   width: 240px;
+  /* .refresh-history__list's own scroll fix (overflow-y: auto, added
+     alongside the sidebar scroll fix) clips overflow-x too — a fixed
+     240px width overflowed the ~227px-wide sidebar column enough to get
+     its left edge clipped, truncating the start of every line ("Captured:"
+     rendering as "tured:"). Capping at the row's own width keeps it fully
+     inside whatever that width actually is, `right: 0` and all. */
+  max-width: 100%;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -692,7 +749,12 @@ button {
   color: var(--color-text);
 }
 
-.refresh-history__info:hover + .refresh-history__tooltip,
+/* The general sibling combinator (~), not the adjacent one (+): the
+   tooltip isn't necessarily the ⓘ button's *immediate* next sibling any
+   more — the 🗑 delete button (logged-in only) sits between them in the
+   DOM. ~ still matches as long as the tooltip comes after ⓘ among
+   siblings, which it always does, delete button present or not. */
+.refresh-history__info:hover ~ .refresh-history__tooltip,
 .refresh-history__tooltip--open {
   display: block;
 }

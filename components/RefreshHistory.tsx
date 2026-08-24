@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchSession } from "@/lib/authClient";
 import {
   captureHistoryNow,
+  deleteHistorySnapshot,
   fetchHistoryList,
   fetchHistorySnapshot,
   type HistorySnapshotDetail,
@@ -16,6 +17,10 @@ interface Props {
    * listings — just for highlighting the matching button. */
   activeSnapshotId: string | null;
   onSelect: (snapshot: HistorySnapshotDetail) => void;
+  /** Called after a snapshot is deleted, only when it was the one currently
+   * being viewed — lets the page fall back to live listings instead of
+   * going on "viewing a saved snapshot" that no longer exists. */
+  onDeleted: (id: string) => void;
 }
 
 // Viewing history is public — every visitor sees the list and can recall a
@@ -24,11 +29,12 @@ interface Props {
 // snapshot is login-only: the "Capture history now" button below is
 // gated on `authenticated`, and POST /api/history/capture independently
 // enforces that server-side regardless of what this component renders.
-export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
+export default function RefreshHistory({ activeSnapshotId, onSelect, onDeleted }: Props) {
   const [authenticated, setAuthenticated] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshotSummary[] | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,8 +53,26 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
       .then((s) => !cancelled && setAuthenticated(s.authenticated))
       .catch(() => !cancelled && setAuthenticated(false));
 
-    function onDocClick() {
-      setOpenInfoId(null);
+    // Closes the open info popover on a click OUTSIDE its own row — by
+    // checking the actual click target's row (via each row's own
+    // data-row-id, walked up with .closest()), not by relying on the
+    // ⓘ/🗑 buttons calling e.stopPropagation() to keep this listener from
+    // ever seeing their click in the first place. That's what this used to
+    // do, and it broke (confirmed live: a click on ⓘ still reached this
+    // listener despite stopPropagation() being called on it) — a plain
+    // document-level listener here can't assume a descendant's
+    // stopPropagation() shielded it. Checking the real target instead
+    // means this is correct no matter what: a click inside the currently-
+    // open row (ⓘ again, 🗑, or the popover itself) leaves state alone —
+    // that row's own button handles opening/closing/deleting itself — a
+    // click inside any OTHER row hands off to that row's own ⓘ handler,
+    // and a click truly outside every row closes whatever's open. Written
+    // as a functional update so it's correct regardless of whether this
+    // listener happens to fire before or after the clicked button's own
+    // handler for the same click.
+    function onDocClick(e: MouseEvent) {
+      const rowId = (e.target as Element).closest?.("[data-row-id]")?.getAttribute("data-row-id") ?? null;
+      setOpenInfoId((cur) => (cur !== null && rowId !== cur ? null : cur));
     }
     document.addEventListener("click", onDocClick);
 
@@ -89,6 +113,29 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
     }
   }
 
+  // Login-only, same as "Capture history now" — the trash button itself is
+  // only rendered when `authenticated` below, and DELETE /api/history/[id]
+  // independently rejects an unauthenticated request regardless of that.
+  // A quick native confirm() first, since this can't be undone (it removes
+  // the snapshot's stored listings payload, not just hides it from the
+  // list) — deliberately outside the try/catch so cancelling never shows
+  // an error banner or touches `deletingId`.
+  async function handleDelete(id: string, label: string) {
+    if (!window.confirm(`Delete the ${label} capture? This can't be undone.`)) return;
+
+    setDeletingId(id);
+    setError(null);
+    try {
+      await deleteHistorySnapshot(id);
+      await refreshList();
+      if (activeSnapshotId === id) onDeleted(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete snapshot");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <section className="refresh-history" aria-label="Refresh history">
       <div className="refresh-history__header">
@@ -114,7 +161,7 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
       ) : (
         <div className="refresh-history__list">
           {snapshots.map((s) => (
-            <div key={s.id} className="refresh-history__row">
+            <div key={s.id} className="refresh-history__row" data-row-id={s.id}>
               <button
                 type="button"
                 className={`refresh-history__item${activeSnapshotId === s.id ? " refresh-history__item--active" : ""}`}
@@ -129,17 +176,22 @@ export default function RefreshHistory({ activeSnapshotId, onSelect }: Props) {
                 className="refresh-history__info"
                 aria-label={`Details for the ${formatDateTime(s.capturedAt)} capture`}
                 aria-expanded={openInfoId === s.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpenInfoId((cur) => (cur === s.id ? null : s.id));
-                }}
+                onClick={() => setOpenInfoId((cur) => (cur === s.id ? null : s.id))}
               >
                 ⓘ
               </button>
-              <div
-                className={`refresh-history__tooltip${openInfoId === s.id ? " refresh-history__tooltip--open" : ""}`}
-                onClick={(e) => e.stopPropagation()}
-              >
+              {authenticated && (
+                <button
+                  type="button"
+                  className="refresh-history__delete"
+                  aria-label={`Delete the ${formatDateTime(s.capturedAt)} capture`}
+                  disabled={deletingId === s.id}
+                  onClick={() => handleDelete(s.id, formatDateTime(s.capturedAt))}
+                >
+                  {deletingId === s.id ? "…" : "🗑"}
+                </button>
+              )}
+              <div className={`refresh-history__tooltip${openInfoId === s.id ? " refresh-history__tooltip--open" : ""}`}>
                 <div className="refresh-history__tooltip-row">
                   <strong>Captured:</strong> {formatDateTime(s.capturedAt)}
                 </div>

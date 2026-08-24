@@ -106,6 +106,31 @@ export async function captureSnapshotNow(): Promise<HistorySnapshotSummary> {
   };
 }
 
+/**
+ * Deletes one snapshot by id — used by the "delete" (trash) button next to
+ * each history entry (DELETE /api/history/[id], login-only — see that
+ * route's own comment). Only removes the `sync_history_snapshots` row
+ * itself (the actual listings payload); its parent `sync_runs` row is left
+ * alone, same as pruneOldSnapshots() above leaves it — that table is kept
+ * only as each snapshot's timestamp record via the FK, not for anything
+ * that would need cleaning up in step with it (see this file's header).
+ * Returns whether a row actually existed to delete, so the route can
+ * return a real 404 instead of a false "ok" for an id that's already gone
+ * (e.g. a double click, or one that pruneOldSnapshots() already dropped).
+ */
+export async function deleteSnapshot(id: string): Promise<boolean> {
+  const admin = requireSupabaseAdmin();
+  const { data, error } = await admin
+    .from("sync_history_snapshots")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (error) {
+    throw new Error(`deleteSnapshot(${id}): delete failed: ${error.message}`);
+  }
+  return (data?.length ?? 0) > 0;
+}
+
 /** Keeps only the MAX_KEPT_SNAPSHOTS most recent rows in
  * `sync_history_snapshots` — the JSONB listings blobs are what actually
  * costs space, so this is what "drop the oldest" means in practice; the

@@ -50,3 +50,15 @@ export async function captureHistoryNow(): Promise<HistorySnapshotSummary> {
   const data = await res.json();
   return data.snapshot;
 }
+
+/** Deletes one snapshot — the trash button next to each history entry.
+ * Requires login, same as captureHistoryNow(); the server rejects an
+ * unauthenticated request regardless of this call site (see DELETE
+ * /api/history/[id]'s own comment). */
+export async function deleteHistorySnapshot(id: string): Promise<void> {
+  const res = await fetch(`/api/history/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Failed to delete snapshot (${res.status})`);
+  }
+}
