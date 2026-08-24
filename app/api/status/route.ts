@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
 import { adapters } from "@/lib/adapters";
 import { runAllAdapters } from "@/lib/syncEngine";
+import { acquireSyncLock, releaseSyncLock } from "@/lib/syncLock";
 import { deriveEffectiveStatus } from "@/lib/statusDerive";
 import type { StatusResponse, StoredSourceStatus, SyncStatusRow } from "@/lib/types";
 
@@ -29,10 +30,27 @@ interface SyncStatusRowDb {
   deduped_count: number;
 }
 
+/**
+ * Runs on first-ever load, and again whenever a new adapter has been added
+ * to the registry but has no row yet (e.g. after this deploy) — this is
+ * the ONLY thing that ever makes a plain, unauthenticated GET request
+ * capable of kicking off a full sync (every other trigger — the Vercel
+ * "Run sync now" button, the GitHub Actions daily run — requires either a
+ * login session or repo access). That's tolerable for "bootstrap an empty
+ * table once," but this route is also polled automatically, by every open
+ * tab, completely unattended (Header.tsx's 60s interval calls GET
+ * /api/status, not just a user opening the Status Monitor) — so it must
+ * go through the same lib/syncLock.ts lock as every other sync trigger
+ * (2026-08-24: it didn't, which meant this path alone could still collide
+ * with a real sync in progress even after every other entry point was
+ * locked down). Unlike the other two callers, a lock already held here is
+ * NOT reported as an error — this is a passive background check, not
+ * something a person asked for, so it just skips this time (the condition
+ * will simply be re-checked on the next poll) rather than failing an
+ * otherwise-fine status read over it.
+ */
 async function ensureInitialSyncHasRun(): Promise<void> {
   const ids = adapters.map((a) => a.id);
-  // Runs on first-ever load, and again whenever a new adapter has been added
-  // to the registry but has no row yet (e.g. after this deploy).
   const { count, error } = await supabase
     .from("sync_status")
     .select("source_id", { count: "exact", head: true })
@@ -40,8 +58,14 @@ async function ensureInitialSyncHasRun(): Promise<void> {
   if (error) {
     throw new Error(`ensureInitialSyncHasRun: failed to read sync_status from Supabase: ${error.message}`);
   }
-  if ((count ?? 0) < ids.length) {
+  if ((count ?? 0) >= ids.length) return;
+
+  const lock = await acquireSyncLock("status-bootstrap");
+  if (!lock.acquired) return; // a real sync is already running elsewhere — leave it alone
+  try {
     await runAllAdapters();
+  } finally {
+    await releaseSyncLock(lock.token);
   }
 }
 
