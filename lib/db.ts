@@ -76,12 +76,60 @@ export function requireSupabaseAdmin(): SupabaseClient {
   return supabaseAdmin;
 }
 
+const PRUNE_PAGE_SIZE = 1000;
+
+/** Every distinct source_id currently present in `table`, paginated (the
+ * server caps a single response at 1000 rows — see lib/listingsQuery.ts's
+ * own comment on the same ceiling) so this is correct regardless of how
+ * many rows `listings` holds. */
+async function distinctSourceIds(
+  admin: SupabaseClient,
+  table: "sync_status" | "listings"
+): Promise<Set<string>> {
+  const seen = new Set<string>();
+  for (let from = 0; ; from += PRUNE_PAGE_SIZE) {
+    const { data, error } = await admin
+      .from(table)
+      .select("source_id")
+      .range(from, from + PRUNE_PAGE_SIZE - 1)
+      .returns<{ source_id: string }[]>();
+    if (error) throw new Error(`pruneUnknownSources: failed to read ${table}: ${error.message}`);
+    for (const row of data ?? []) seen.add(row.source_id);
+    if (!data || data.length < PRUNE_PAGE_SIZE) break;
+  }
+  return seen;
+}
+
 /**
  * Deletes any sync_status/listings rows belonging to a sourceId that isn't
  * in london-developers.json — the canonical allow-list, checked directly
  * rather than via the adapter registry, so the database itself refuses to
  * retain rows for anything unapproved. Cleans up rows left behind by
  * adapters that were removed (e.g. the old mock sources).
+ *
+ * 2026-08-25: this used to build one hand-rolled "(a,b,c)" string of every
+ * valid id and pass it to `.not(column, "in", thatString)` — confirmed
+ * live to silently drop part of the list rather than erroring: a real run
+ * deleted 5 genuinely current sources' rows (benhams-london, winkworth,
+ * hamptons, knight-frank, renowned-homes) right along with the actually-
+ * stale ones. Root cause, reproduced directly against Postgres: an
+ * unquoted list value starting with a digit ("1newhomes", one of the 18
+ * valid ids) breaks parsing ("trailing junk after numeric literal" —
+ * Postgres tries to read a leading digit as the start of a numeric
+ * literal), and whatever happens after that parse failure quietly narrows
+ * the effective list instead of surfacing an error — every id after that
+ * point in the string stopped being treated as "valid," Postgres or
+ * PostgREST silently, not this function explicitly deciding to drop them.
+ *
+ * Rewritten to never build that string, or send Postgres any "in"/"not in"
+ * list value to parse, at all: reads every distinct source_id actually
+ * present in each table, decides in plain JS which ones aren't in the
+ * allow-list (ALLOWED_DEVELOPER_IDS is already a real Set — a plain
+ * `.has()` check, nothing to parse), and only ever issues a POSITIVE
+ * `.in(column, arrayOfRealIds)` delete for exactly those — verified live
+ * against real data to behave correctly regardless of leading digits or
+ * hyphens in an id, since supabase-js's own `.in()` builds that filter
+ * value itself rather than asking this code to hand-format one.
  *
  * Used to run once per local SQLite connection open; there's no equivalent
  * single moment against a remote Postgres database, so it's called
@@ -90,15 +138,23 @@ export function requireSupabaseAdmin(): SupabaseClient {
  * actually about to write, rather than by opening a connection.
  */
 export async function pruneUnknownSources(): Promise<void> {
-  const validIds = [...ALLOWED_DEVELOPER_IDS];
-  if (validIds.length === 0) return;
+  const validIds = ALLOWED_DEVELOPER_IDS;
+  if (validIds.size === 0) return;
   const admin = requireSupabaseAdmin();
-  const idList = `(${validIds.join(",")})`;
 
-  const [{ error: syncErr }, { error: listErr }] = await Promise.all([
-    admin.from("sync_status").delete().not("source_id", "in", idList),
-    admin.from("listings").delete().not("source_id", "in", idList),
+  const [syncStatusIds, listingsIds] = await Promise.all([
+    distinctSourceIds(admin, "sync_status"),
+    distinctSourceIds(admin, "listings"),
   ]);
-  if (syncErr) throw new Error(`pruneUnknownSources: failed to prune sync_status: ${syncErr.message}`);
-  if (listErr) throw new Error(`pruneUnknownSources: failed to prune listings: ${listErr.message}`);
+  const syncStatusToDelete = [...syncStatusIds].filter((id) => !validIds.has(id));
+  const listingsToDelete = [...listingsIds].filter((id) => !validIds.has(id));
+
+  if (syncStatusToDelete.length > 0) {
+    const { error } = await admin.from("sync_status").delete().in("source_id", syncStatusToDelete);
+    if (error) throw new Error(`pruneUnknownSources: failed to prune sync_status: ${error.message}`);
+  }
+  if (listingsToDelete.length > 0) {
+    const { error } = await admin.from("listings").delete().in("source_id", listingsToDelete);
+    if (error) throw new Error(`pruneUnknownSources: failed to prune listings: ${error.message}`);
+  }
 }

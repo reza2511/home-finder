@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { adapters } from "@/lib/adapters";
-import { runAllAdapters } from "@/lib/syncEngine";
-import { acquireSyncLock, releaseSyncLock } from "@/lib/syncLock";
 import { deriveEffectiveStatus } from "@/lib/statusDerive";
 import type { StatusResponse, StoredSourceStatus, SyncStatusRow } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// This route's first-ever hit can trigger a full browser-based sync (see
-// ensureInitialSyncHasRun below) — same reasoning/caveats as
-// app/api/sync/route.ts's maxDuration.
-export const maxDuration = 300;
 
 interface SyncStatusRowDb {
   source_id: string;
@@ -30,48 +23,26 @@ interface SyncStatusRowDb {
   deduped_count: number;
 }
 
-/**
- * Runs on first-ever load, and again whenever a new adapter has been added
- * to the registry but has no row yet (e.g. after this deploy) — this is
- * the ONLY thing that ever makes a plain, unauthenticated GET request
- * capable of kicking off a full sync (every other trigger — the Vercel
- * "Run sync now" button, the GitHub Actions daily run — requires either a
- * login session or repo access). That's tolerable for "bootstrap an empty
- * table once," but this route is also polled automatically, by every open
- * tab, completely unattended (Header.tsx's 60s interval calls GET
- * /api/status, not just a user opening the Status Monitor) — so it must
- * go through the same lib/syncLock.ts lock as every other sync trigger
- * (2026-08-24: it didn't, which meant this path alone could still collide
- * with a real sync in progress even after every other entry point was
- * locked down). Unlike the other two callers, a lock already held here is
- * NOT reported as an error — this is a passive background check, not
- * something a person asked for, so it just skips this time (the condition
- * will simply be re-checked on the next poll) rather than failing an
- * otherwise-fine status read over it.
- */
-async function ensureInitialSyncHasRun(): Promise<void> {
-  const ids = adapters.map((a) => a.id);
-  const { count, error } = await supabase
-    .from("sync_status")
-    .select("source_id", { count: "exact", head: true })
-    .in("source_id", ids);
-  if (error) {
-    throw new Error(`ensureInitialSyncHasRun: failed to read sync_status from Supabase: ${error.message}`);
-  }
-  if ((count ?? 0) >= ids.length) return;
-
-  const lock = await acquireSyncLock("status-bootstrap");
-  if (!lock.acquired) return; // a real sync is already running elsewhere — leave it alone
-  try {
-    await runAllAdapters();
-  } finally {
-    await releaseSyncLock(lock.token);
-  }
-}
-
+// A sync is now started ONLY by scripts/run-sync.ts (the GitHub Actions
+// daily 6am run, or a manual `workflow_dispatch` of that same workflow) or
+// by a logged-in operator clicking "Run sync now" (POST /api/sync). This
+// route used to also carry an ensureInitialSyncHasRun() bootstrap — ran on
+// every single GET here (Header.tsx polls this route automatically every
+// 60s from any open tab, unattended, and the Status Monitor also calls it
+// on every open), and if sync_status ever had fewer rows than the current
+// adapter registry (first-ever deploy with an empty table, or a newly
+// added adapter with no row yet) it would silently kick off a FULL sync —
+// completely unauthenticated, with no login/repo-access gate at all,
+// unlike either real trigger above. 2026-08-25: exactly that fired a real,
+// unwanted sync ("status-bootstrap" in lib/syncLock.ts's lock — that
+// label was this bootstrap's own acquireSyncLock() call) from nothing
+// more than a page load/status poll — removed outright rather than
+// reworked, since "bootstrap an empty table automatically" is itself the
+// behaviour that's no longer wanted: an empty/incomplete sync_status now
+// just means the Status Monitor shows fewer/no rows for those sources
+// until the next real sync (schedule or manual) runs, same as any other
+// day sync_status is simply out of date.
 export async function GET() {
-  await ensureInitialSyncHasRun();
-
   const { data: rows, error } = await supabase
     .from("sync_status")
     .select(
