@@ -6,7 +6,9 @@ import { fetchSession } from "@/lib/authClient";
 import { formatRelativeTime } from "@/lib/relativeTime";
 import type { SourceStatus, SyncStatusRow } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
+import SyncHistoryView from "./SyncHistoryView";
 
+type ViewKey = "current" | "history";
 type TabKey = "all" | "updated" | "not_updating" | "blocked" | "errors" | "not_built";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -48,6 +50,7 @@ const STATUS_PRIORITY: Record<SourceStatus, number> = {
 };
 
 export default function StatusMonitorModal({ onClose }: { onClose: () => void }) {
+  const [view, setView] = useState<ViewKey>("current");
   const [sources, setSources] = useState<SyncStatusRow[] | null>(null);
   const [tab, setTab] = useState<TabKey>("all");
   const [loading, setLoading] = useState(true);
@@ -184,72 +187,101 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
           </div>
         </div>
 
-        <div className="status-tabs" role="tablist">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.key}
-              className={`status-tab${tab === t.key ? " status-tab--active" : ""}`}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-              <span className="status-tab__count">{tabCounts[t.key]}</span>
-            </button>
-          ))}
+        <div className="status-view-toggle" role="tablist" aria-label="Status Monitor view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "current"}
+            className={`status-view-toggle__btn${view === "current" ? " status-view-toggle__btn--active" : ""}`}
+            onClick={() => setView("current")}
+          >
+            Current status
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "history"}
+            className={`status-view-toggle__btn${view === "history" ? " status-view-toggle__btn--active" : ""}`}
+            onClick={() => setView("history")}
+          >
+            Sync history
+          </button>
         </div>
 
-        <div className="modal__body">
-          {error && <div className="status-banner status-banner--error">{error}</div>}
+        {view === "current" && (
+          <div className="status-tabs" role="tablist">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                className={`status-tab${tab === t.key ? " status-tab--active" : ""}`}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+                <span className="status-tab__count">{tabCounts[t.key]}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
-          {loading && !sources ? (
-            <div className="status-empty">Loading source status…</div>
-          ) : filtered.length === 0 ? (
-            <div className="status-empty">No sources in this view.</div>
+        <div className="modal__body">
+          {view === "history" ? (
+            <SyncHistoryView />
           ) : (
-            <div className="status-table-wrap">
-              <table className="status-table">
-                <thead>
-                  <tr>
-                    <th>Source</th>
-                    <th>Status</th>
-                    <th>Last success</th>
-                    <th>Listings found</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((s) => (
-                    <tr key={s.sourceId}>
-                      <td className="status-table__source">{s.sourceName}</td>
-                      <td>
-                        <StatusBadge status={s.status} />
-                      </td>
-                      <td>{formatRelativeTime(s.lastSuccessAt)}</td>
-                      <td>{s.listingsFound}</td>
-                      <td className="status-table__details">
-                        {s.errorMessage ? (
-                          <span className="status-table__error" title={s.errorMessage}>
-                            {s.errorMessage}
-                          </span>
-                        ) : s.status === "ok" ? (
-                          <span className="status-table__muted">
-                            +{s.added} added · {s.updated} updated ·{" "}
-                            <span className={s.removed > 0 ? "status-table__removed" : undefined}>
-                              −{s.removed} removed
-                            </span>
-                            {s.extractionMethod ? ` · via ${s.extractionMethod}` : ""}
-                          </span>
-                        ) : (
-                          <span className="status-table__muted">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {error && <div className="status-banner status-banner--error">{error}</div>}
+
+              {loading && !sources ? (
+                <div className="status-empty">Loading source status…</div>
+              ) : filtered.length === 0 ? (
+                <div className="status-empty">No sources in this view.</div>
+              ) : (
+                <div className="status-table-wrap">
+                  <table className="status-table">
+                    <thead>
+                      <tr>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th>Last success</th>
+                        <th>Listings found</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((s) => (
+                        <tr key={s.sourceId}>
+                          <td className="status-table__source">{s.sourceName}</td>
+                          <td>
+                            <StatusBadge status={s.status} />
+                          </td>
+                          <td>{formatRelativeTime(s.lastSuccessAt)}</td>
+                          <td>{s.listingsFound}</td>
+                          <td className="status-table__details">
+                            {s.errorMessage ? (
+                              <span className="status-table__error" title={s.errorMessage}>
+                                {s.errorMessage}
+                              </span>
+                            ) : s.status === "ok" ? (
+                              <span className="status-table__muted">
+                                +{s.added} added · {s.updated} updated ·{" "}
+                                <span className={s.removed > 0 ? "status-table__removed" : undefined}>
+                                  −{s.removed} removed
+                                </span>
+                                {s.extractionMethod ? ` · via ${s.extractionMethod}` : ""}
+                              </span>
+                            ) : (
+                              <span className="status-table__muted">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

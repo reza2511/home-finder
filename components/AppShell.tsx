@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Header from "./Header";
 import StatusMonitorModal from "./StatusMonitorModal";
 import FilterPanel from "./FilterPanel";
@@ -29,20 +29,24 @@ export default function AppShell() {
   // card's heart icon entirely in that case, not just the click action.
   const [favouriteKeys, setFavouriteKeys] = useState<Set<string> | null>(null);
 
+  // Pulled out of the mount effect below so the header's "Clear cache"
+  // button can call the exact same fresh, no-store fetch on demand — not a
+  // separate/lighter re-fetch that could disagree with what first loaded.
+  const loadListings = useCallback(async () => {
+    const res = await fetch("/api/listings", { cache: "no-store" });
+    const data = await res.json();
+    setListings(data.listings);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/listings", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setListings(d.listings);
-      })
-      .catch(() => {
-        if (!cancelled) setListings([]);
-      });
+    loadListings().catch(() => {
+      if (!cancelled) setListings([]);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadListings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +147,7 @@ export default function AppShell() {
 
   return (
     <>
-      <Header onOpenStatus={() => setStatusOpen(true)} />
+      <Header onOpenStatus={() => setStatusOpen(true)} onClearCache={loadListings} />
       <main className="page-content">
         <h1 className="page-heading">Find your next home</h1>
         <p className="page-subheading">

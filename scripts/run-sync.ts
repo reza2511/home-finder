@@ -79,6 +79,7 @@ import { runAllAdapters, ADAPTER_TIMEOUT_MS } from "../lib/syncEngine";
 import { adapters } from "../lib/adapters";
 import { isSecondPhaseSource } from "../lib/developers";
 import { acquireSyncLock, releaseSyncLock, lockedMessage } from "../lib/syncLock";
+import { startSyncRunLog, finishSyncRunLog } from "../lib/syncRunLog";
 
 // The engine's own per-adapter timeout (lib/syncEngine.ts) already bounds
 // a single source's run and records a proper `error`/`blocked` sync_status
@@ -129,7 +130,7 @@ function delay(ms: number): Promise<void> {
  * Never throws for one source's own failure, even after its retry — those
  * are caught and logged so one broken source never blocks the rest of the
  * day's sync. */
-async function main(): Promise<number> {
+async function main(runId: string): Promise<number> {
   const direct = adapters.filter((a) => !isSecondPhaseSource(a.id)).map((a) => a.id);
   const secondPhase = adapters.filter((a) => isSecondPhaseSource(a.id)).map((a) => a.id);
   const orderedIds = [...direct, ...secondPhase];
@@ -150,7 +151,7 @@ async function main(): Promise<number> {
         // its usual pruneUnknownSources() + direct/second-phase
         // classification per call, so each source is written to Supabase
         // (including its own sync_status row) before the loop moves on.
-        await withOuterTimeout(runAllAdapters([id]), OUTER_TIMEOUT_MS, id);
+        await withOuterTimeout(runAllAdapters([id], runId), OUTER_TIMEOUT_MS, id);
         succeeded = true;
       } catch (err) {
         lastErr = err;
@@ -201,8 +202,17 @@ async function run(): Promise<void> {
   }
 
   let exitCode = 0;
+  // One run id for the whole script execution, even though main() below
+  // calls runAllAdapters() once per source — see that function's own doc
+  // comment for why a per-source id would be wrong here. Not wrapped in the
+  // same best-effort try/catch as finishSyncRunLog below: startSyncRunLog()
+  // deliberately throws on failure (lib/syncRunLog.ts), and a run with no
+  // history header row to attach source rows to is treated the same as any
+  // other fatal error that happens before main() gets going.
+  let runId: string | null = null;
   try {
-    exitCode = await main();
+    runId = await startSyncRunLog("github-actions");
+    exitCode = await main(runId);
   } catch (err) {
     // Something failed outside the per-source loop entirely (e.g. the
     // adapter registry itself throwing at import time) — this is the
@@ -210,6 +220,16 @@ async function run(): Promise<void> {
     console.error("[run-sync] Fatal error:", err);
     exitCode = 1;
   } finally {
+    // Best-effort on top of finishSyncRunLog's own internal best-effort
+    // handling — never let a history-logging hiccup stop the lock from
+    // being released below.
+    if (runId) {
+      try {
+        await finishSyncRunLog(runId);
+      } catch (err) {
+        console.warn("[run-sync] finishSyncRunLog failed (non-fatal):", err);
+      }
+    }
     await releaseSyncLock(lock.token);
   }
 

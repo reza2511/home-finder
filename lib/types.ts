@@ -49,6 +49,37 @@ export interface StatusResponse {
   summary: StatusSummary;
 }
 
+/** One source's result within one sync run — supabase/migrations/0012_sync_run_log.sql
+ * (sync_run_source_log). `listingsFound` doubles as "kept": the number of
+ * this source's listings that were active at the end of this run
+ * (added + updated). */
+export interface SyncRunSourceLog {
+  sourceId: string;
+  sourceName: string;
+  status: StoredSourceStatus;
+  listingsFound: number;
+  added: number;
+  updated: number;
+  removed: number;
+  dedupedCount: number;
+  durationMs: number | null;
+  ranAt: string;
+}
+
+/** One whole sync run — supabase/migrations/0012_sync_run_log.sql
+ * (sync_runs_log) plus its sources from sync_run_source_log. `finishedAt`/
+ * `totalActiveCount` are both null while the run is still in progress, or
+ * if it crashed before finishSyncRunLog() ever ran (lib/syncRunLog.ts) —
+ * shown as "incomplete" rather than guessed. */
+export interface SyncRunLog {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  triggeredBy: string;
+  totalActiveCount: number | null;
+  sources: SyncRunSourceLog[];
+}
+
 export type TenureValue = "share_of_freehold" | "leasehold" | "freehold" | "shared_ownership";
 export type BedroomTypeValue = "single" | "double" | null;
 

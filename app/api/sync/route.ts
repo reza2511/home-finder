@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runAllAdapters } from "@/lib/syncEngine";
 import { isAuthenticated } from "@/lib/auth";
 import { acquireSyncLock, releaseSyncLock, lockedMessage } from "@/lib/syncLock";
+import { startSyncRunLog, finishSyncRunLog } from "@/lib/syncRunLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,9 +47,19 @@ export async function POST(request: Request) {
   }
 
   const startedAt = Date.now();
+  // One run id for this whole POST — a single runAllAdapters() call here
+  // (unlike scripts/run-sync.ts's own once-per-source loop), so this is the
+  // simple case: start the history header row, run everything, close it
+  // out. `runId` is only assigned once startSyncRunLog() actually succeeds
+  // — it throws on failure (lib/syncRunLog.ts), so the `if (runId)` in
+  // `finally` below is what keeps that failure from skipping the lock
+  // release; finishSyncRunLog() itself is already best-effort internally.
+  let runId: string | null = null;
   try {
-    await runAllAdapters(ids);
+    runId = await startSyncRunLog("vercel-manual");
+    await runAllAdapters(ids, runId);
   } finally {
+    if (runId) await finishSyncRunLog(runId);
     await releaseSyncLock(lock.token);
   }
   return NextResponse.json({

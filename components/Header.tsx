@@ -1,36 +1,57 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchStatus } from "@/lib/statusClient";
 import { fetchSession, logout } from "@/lib/authClient";
+import { clearCache } from "@/lib/cacheClient";
 import HamburgerMenu from "./HamburgerMenu";
 import type { StatusSummary } from "@/lib/types";
 
 // onOpenStatus is optional so pages other than the home page (e.g.
 // /compare) can reuse the same header/nav without needing a Status Monitor
 // modal to wire up — the button itself just doesn't render without it.
-export default function Header({ onOpenStatus }: { onOpenStatus?: () => void }) {
+// onClearCache is likewise optional: only the home page actually has
+// listings to re-fetch, so the "Clear cache" button just doesn't render
+// anywhere else (same convention as onOpenStatus, right next to it).
+export default function Header({
+  onOpenStatus,
+  onClearCache,
+}: {
+  onOpenStatus?: () => void;
+  onClearCache?: () => Promise<void>;
+}) {
   const [summary, setSummary] = useState<StatusSummary | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [cacheCleared, setCacheCleared] = useState(false);
+  const clearedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const data = await fetchStatus();
+      setSummary(data.summary);
+    } catch {
+      // Best-effort indicator only — the modal itself surfaces load errors.
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-
     async function load() {
-      try {
-        const data = await fetchStatus();
-        if (!cancelled) setSummary(data.summary);
-      } catch {
-        // Best-effort indicator only — the modal itself surfaces load errors.
-      }
+      if (!cancelled) await loadStatus();
     }
-
     load();
     const interval = setInterval(load, 60_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
+    };
+  }, [loadStatus]);
+
+  useEffect(() => {
+    return () => {
+      if (clearedTimeoutRef.current) clearTimeout(clearedTimeoutRef.current);
     };
   }, []);
 
@@ -60,6 +81,28 @@ export default function Header({ onOpenStatus }: { onOpenStatus?: () => void }) 
     }
   }
 
+  // Hits POST /api/cache/clear (a real revalidatePath() call — see that
+  // route's own comment on what it actually purges today), then forces a
+  // fresh re-fetch of both this header's own status summary and, via
+  // onClearCache, the page's live listings — so a click genuinely re-reads
+  // the database end to end rather than just showing a confirmation and
+  // hoping the next automatic poll happens to pick up a change.
+  async function handleClearCache() {
+    setClearingCache(true);
+    try {
+      await clearCache();
+      await Promise.all([loadStatus(), onClearCache?.()]);
+      setCacheCleared(true);
+      if (clearedTimeoutRef.current) clearTimeout(clearedTimeoutRef.current);
+      clearedTimeoutRef.current = setTimeout(() => setCacheCleared(false), 2500);
+    } catch {
+      // Best-effort — the button itself is a convenience; a failed clear
+      // just means the next automatic poll/refresh catches up as usual.
+    } finally {
+      setClearingCache(false);
+    }
+  }
+
   const hasProblems = !!summary && (summary.blocked > 0 || summary.error > 0);
   const hasWarnings = !!summary && (summary.stale > 0 || summary.no_results > 0);
   const dotModifier = !summary
@@ -82,6 +125,24 @@ export default function Header({ onOpenStatus }: { onOpenStatus?: () => void }) 
         </div>
       </div>
       <div className="app-header__actions">
+        {onClearCache && (
+          <span className="clear-cache">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={handleClearCache}
+              disabled={clearingCache}
+              title="Force the live site to re-fetch everything fresh from the database"
+            >
+              {clearingCache ? "Clearing…" : "Clear cache"}
+            </button>
+            {cacheCleared && (
+              <span className="clear-cache__confirm" role="status">
+                Cache cleared ✓
+              </span>
+            )}
+          </span>
+        )}
         {onOpenStatus && (
           <button
             type="button"

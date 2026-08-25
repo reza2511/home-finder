@@ -13,6 +13,7 @@ import { applyNewBuildOverride } from "./adapters/newBuildDetection";
 import { dedupeAgainstActiveListings } from "./adapters/dedupe";
 import { upsertListingsForSource } from "./listingsStore";
 import { captureDailyStatsSnapshot } from "./statsStore";
+import { recordSourceRunLog } from "./syncRunLog";
 import type { SourceType, StoredSourceStatus } from "./types";
 
 // Some adapters make several real, sequential HTTP requests (Barratt London:
@@ -124,7 +125,15 @@ async function previousLastSuccessAt(sourceId: string): Promise<string | null> {
   return data?.last_success_at ?? null;
 }
 
-async function runOne(adapter: SourceAdapter): Promise<void> {
+/** `runId` ties every source's row in sync_run_source_log
+ * (lib/syncRunLog.ts) back to the one sync_runs_log header row for the
+ * whole run it's part of — see runAllAdapters's own doc comment for why
+ * that's a wider scope than "one runAllAdapters() call" for
+ * scripts/run-sync.ts specifically. Omitted (undefined) skips history
+ * logging entirely rather than inventing a run id — every current caller
+ * always supplies one; this is just so a stray future caller degrades
+ * gracefully instead of throwing. */
+async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
   const startedAt = Date.now();
   const lastRunAt = new Date().toISOString();
 
@@ -199,6 +208,19 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
       extraction_method: result.extractionMethod ?? null,
       deduped_count: dedupedCount,
     });
+    if (runId) {
+      await recordSourceRunLog(runId, {
+        sourceId: adapter.id,
+        sourceName: adapter.name,
+        status,
+        listingsFound: listingsToStore.length,
+        added: diff.added,
+        updated: diff.updated,
+        removed: diff.removed,
+        dedupedCount,
+        durationMs,
+      });
+    }
   } catch (err) {
     const durationMs = Date.now() - startedAt;
     const { status, httpStatus, message } = classifyFailure(err);
@@ -219,6 +241,19 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
       extraction_method: null,
       deduped_count: 0,
     });
+    if (runId) {
+      await recordSourceRunLog(runId, {
+        sourceId: adapter.id,
+        sourceName: adapter.name,
+        status,
+        listingsFound: 0,
+        added: 0,
+        updated: 0,
+        removed: 0,
+        dedupedCount: 0,
+        durationMs,
+      });
+    }
   }
 }
 
@@ -261,18 +296,29 @@ async function runOne(adapter: SourceAdapter): Promise<void> {
  * Refresh history (lib/historyStore.ts) is no longer tied to a sync run at
  * all — it's captured on a fixed daily schedule (Vercel Cron) or on demand
  * (the "Capture history now" button), independent of when/whether a sync
- * happens to run. */
-export async function runAllAdapters(sourceIds?: string[]): Promise<void> {
+ * happens to run.
+ *
+ * `runId` (lib/syncRunLog.ts) is deliberately a caller-supplied value, not
+ * generated in here: scripts/run-sync.ts calls this once PER SOURCE (see
+ * its own file header for why), but every one of those calls is still part
+ * of the same logical sync run for history purposes — generating a fresh
+ * id per call would fragment one real run into 18 separate history entries
+ * instead of one with 18 sources under it. Both real callers
+ * (scripts/run-sync.ts, app/api/sync/route.ts) generate exactly one id via
+ * startSyncRunLog() before their own loop/call and pass it through every
+ * invocation; omitted entirely, history logging is just skipped rather than
+ * inventing a run id no one asked for. */
+export async function runAllAdapters(sourceIds?: string[], runId?: string): Promise<void> {
   await pruneUnknownSources();
   const targets = sourceIds ? adapters.filter((a) => sourceIds.includes(a.id)) : adapters;
   const directTargets = targets.filter((a) => !isSecondPhaseSource(a.id));
   const secondPhaseTargets = targets.filter((a) => isSecondPhaseSource(a.id));
 
   for (const adapter of directTargets) {
-    await runOne(adapter);
+    await runOne(adapter, runId);
   }
   for (const adapter of secondPhaseTargets) {
-    await runOne(adapter);
+    await runOne(adapter, runId);
   }
 
   // Statistics page snapshot (lib/statsStore.ts) — upserts today's UTC-date

@@ -218,6 +218,25 @@ button {
   background: var(--color-danger-dot);
 }
 
+.clear-cache {
+  position: relative;
+  display: inline-flex;
+}
+
+.clear-cache__confirm {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--color-ok-bg);
+  color: var(--color-ok-text);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
 /* ---------- Main content ---------- */
 
 .page-content {
@@ -1157,6 +1176,74 @@ button {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ---------- Status Monitor view toggle ---------- */
+
+.status-view-toggle {
+  display: flex;
+  gap: 6px;
+  padding: 14px 24px 0;
+}
+
+.status-view-toggle__btn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.status-view-toggle__btn:hover {
+  color: var(--color-text);
+}
+
+.status-view-toggle__btn--active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+/* ---------- Sync history ---------- */
+
+.sync-history {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-top: 12px;
+}
+
+.sync-history__run-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.sync-history__run-total {
+  font-size: 13px;
+}
+
+.sync-history__delta {
+  font-weight: 600;
+}
+
+.sync-history__delta--up {
+  color: var(--color-ok-text);
+}
+
+.sync-history__delta--down {
+  color: var(--color-stale-text);
+}
+
+.sync-history__kept--flagged {
+  color: var(--color-danger-text);
+  font-weight: 700;
 }
 
 /* ---------- Status badge ---------- */
