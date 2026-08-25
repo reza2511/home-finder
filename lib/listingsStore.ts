@@ -27,6 +27,23 @@ interface ExistingRow {
  * after) counts as "updated" — this is a simple re-seen count, not a
  * field-level change diff.
  *
+ * 2026-08-25: `incoming` being empty used to still run the full removal
+ * diff — `toRemove` came out as literally every currently-active row for
+ * this source, so a source adapter that ran without throwing but happened
+ * to find zero listings (a transient empty response, a page-structure
+ * change the adapter's own parsing didn't notice, a momentary block that
+ * didn't trip its error path) silently wiped that source's entire active
+ * set in one call. A real 0-result run IS possible (a source genuinely
+ * having nothing live right now), but there is no way from here to tell
+ * that apart from an adapter quietly returning nothing it shouldn't have —
+ * and the cost of wrongly keeping a handful of truly-gone listings around
+ * a little longer is far smaller than the cost of wrongly nuking an entire
+ * source's real listings. So: the removal diff now only ever runs when
+ * `incoming` is non-empty — a 0-result run leaves every previously-active
+ * listing for this source untouched (not removed), same as a source that
+ * fails outright already does one level up (lib/syncEngine.ts's runOne
+ * never calls this function at all when adapter.run() throws).
+ *
  * Writes via the service_role client (requireSupabaseAdmin) since RLS has
  * no anon/authenticated insert or update policy on `listings` — see
  * supabase/migrations/0001_init.sql.
@@ -124,7 +141,12 @@ export async function upsertListingsForSource(
   }
 
   const incomingIds = new Set(incoming.map((l) => l.externalId));
-  const toRemove = [...activeIds].filter((id) => !incomingIds.has(id));
+  // See this function's own doc comment: never diff a removal set out of an
+  // empty `incoming` — that would mean "found nothing" and "genuinely gone"
+  // are treated identically, which is exactly the failure mode being
+  // guarded against here.
+  const toRemove =
+    incoming.length > 0 ? [...activeIds].filter((id) => !incomingIds.has(id)) : [];
   if (toRemove.length > 0) {
     const { error: removeErr } = await admin
       .from("listings")

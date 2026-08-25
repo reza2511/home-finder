@@ -307,9 +307,32 @@ async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
  * (scripts/run-sync.ts, app/api/sync/route.ts) generate exactly one id via
  * startSyncRunLog() before their own loop/call and pass it through every
  * invocation; omitted entirely, history logging is just skipped rather than
- * inventing a run id no one asked for. */
-export async function runAllAdapters(sourceIds?: string[], runId?: string): Promise<void> {
-  await pruneUnknownSources();
+ * inventing a run id no one asked for.
+ *
+ * `prune` (default true) gates the pruneUnknownSources() call below — the
+ * only code in this app that ever hard-deletes `listings`/`sync_status`
+ * rows (lib/db.ts). 2026-08-25: a full "Run sync now" request on Vercel
+ * timed out mid-run (all 18 sources, several Playwright-based, sequenced
+ * one at a time, easily exceeds the platform's per-request duration cap)
+ * and got hard-killed — its own `finally` (releasing lib/syncLock.ts's
+ * lock) never ran, and the incident this was traced back to had this same
+ * shape: something deleting rows for sources a run never even reached.
+ * scripts/run-sync.ts (the GitHub Actions daily cron) has no such
+ * request-duration ceiling — a run there either completes or the workflow's
+ * own generous timeout-minutes fires — so it's the one caller that keeps
+ * pruning on its default. app/api/sync/route.ts explicitly passes `false`:
+ * a browser-triggered request can be killed by the platform at any moment
+ * outside anyone's control, so it must never be the thing holding a
+ * destructive DELETE. Nothing is lost by this split — every valid source
+ * still gets pruned once a day by the cron; an unknown source's rows just
+ * don't get cleaned up mid-day by a manual click anymore, which was never
+ * the point of that button anyway. */
+export async function runAllAdapters(
+  sourceIds?: string[],
+  runId?: string,
+  prune: boolean = true
+): Promise<void> {
+  if (prune) await pruneUnknownSources();
   const targets = sourceIds ? adapters.filter((a) => sourceIds.includes(a.id)) : adapters;
   const directTargets = targets.filter((a) => !isSecondPhaseSource(a.id));
   const secondPhaseTargets = targets.filter((a) => isSecondPhaseSource(a.id));

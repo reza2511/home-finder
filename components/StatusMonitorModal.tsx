@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchStatus, triggerSync } from "@/lib/statusClient";
+import { fetchStatus, triggerSync, type SyncProgress } from "@/lib/statusClient";
 import { fetchSession } from "@/lib/authClient";
 import { formatRelativeTime } from "@/lib/relativeTime";
 import type { SourceStatus, SyncStatusRow } from "@/lib/types";
@@ -55,6 +55,7 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
   const [tab, setTab] = useState<TabKey>("all");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   // "Run sync now" is only ever offered to a logged-in operator — the real
   // protection is server-side (POST /api/sync rejects an unauthenticated
@@ -104,13 +105,22 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
   async function handleRunSync() {
     setSyncing(true);
     setError(null);
+    setSyncProgress(null);
     try {
-      await triggerSync();
-      await load();
+      // One POST /api/sync request per source, sequential — see
+      // lib/statusClient.ts's triggerSync for why. Refresh the table after
+      // every source so real progress shows up live instead of the whole
+      // modal looking frozen until every one of ~18 sources has run.
+      await triggerSync((p) => {
+        setSyncProgress(p);
+        load();
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sync failed");
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
+      await load();
     }
   }
 
@@ -169,7 +179,11 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
                 onClick={handleRunSync}
                 disabled={syncing}
               >
-                {syncing ? "Syncing…" : "Run sync now"}
+                {syncing
+                  ? syncProgress
+                    ? `Syncing… (${syncProgress.index + 1}/${syncProgress.total})`
+                    : "Syncing…"
+                  : "Run sync now"}
               </button>
             ) : (
               <a href="/login" className="btn btn--ghost">

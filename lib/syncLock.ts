@@ -38,7 +38,11 @@ const LOCK_ROW_ID = 1;
 // for every one of ~18 sources hitting its own 900s adapter timeout back
 // to back — see that file and ADAPTER_TIMEOUT_MS in lib/syncEngine.ts),
 // so this needs real headroom above that worst case, not just above a
-// normal run's actual few-minutes duration.
+// normal run's actual few-minutes duration. This is the default, used by
+// the GitHub Actions caller — acquireSyncLock's `staleMs` param lets a
+// caller with a much smaller legitimate worst-case (the Vercel manual
+// trigger — see app/api/sync/route.ts) opt into a much shorter one, so a
+// killed request self-heals in minutes instead of hours.
 const STALE_LOCK_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export interface SyncLockInfo {
@@ -55,6 +59,14 @@ export type AcquireSyncLockResult =
  * "github-actions" or "vercel-manual") purely to make a rejection message
  * readable — it plays no role in whether the lock is granted.
  *
+ * `staleMs` (default STALE_LOCK_MS, 6h) is how old a held lock has to be
+ * before it's treated as abandoned rather than a run still genuinely in
+ * progress — see STALE_LOCK_MS's own comment. Callers whose own worst-case
+ * run time is much shorter than 6h (the Vercel manual trigger, now bounded
+ * to a single source per request — see app/api/sync/route.ts) should pass
+ * a smaller value so a request Vercel kills for exceeding its own function
+ * timeout doesn't leave every other sync locked out for hours over it.
+ *
  * Race-safe via compare-and-swap: reads the row's current `locked_at`,
  * then writes the new lock only `where locked_at` still equals exactly
  * what was just read (including matching a real `null` when free). If a
@@ -65,7 +77,10 @@ export type AcquireSyncLockResult =
  * expressed through PostgREST's read-then-conditional-write instead since
  * there's no server-side function to do it in one round trip here.
  */
-export async function acquireSyncLock(label: string): Promise<AcquireSyncLockResult> {
+export async function acquireSyncLock(
+  label: string,
+  staleMs: number = STALE_LOCK_MS
+): Promise<AcquireSyncLockResult> {
   const admin = requireSupabaseAdmin();
 
   const { data: current, error: readErr } = await admin
@@ -78,7 +93,7 @@ export async function acquireSyncLock(label: string): Promise<AcquireSyncLockRes
   }
 
   const isFree = current.locked_at === null;
-  const isStale = !isFree && Date.now() - new Date(current.locked_at!).getTime() > STALE_LOCK_MS;
+  const isStale = !isFree && Date.now() - new Date(current.locked_at!).getTime() > staleMs;
   if (!isFree && !isStale) {
     return { acquired: false, heldBy: { lockedAt: current.locked_at!, lockedBy: current.locked_by ?? "unknown" } };
   }
