@@ -7,8 +7,9 @@ import { formatRelativeTime } from "@/lib/relativeTime";
 import type { SourceStatus, SyncStatusRow } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
 import SyncHistoryView from "./SyncHistoryView";
+import AutoActionsLog from "./AutoActionsLog";
 
-type ViewKey = "current" | "history";
+type ViewKey = "current" | "history" | "auto-actions";
 type TabKey = "all" | "updated" | "not_updating" | "blocked" | "errors" | "not_built";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -220,6 +221,15 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
           >
             Sync history
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "auto-actions"}
+            className={`status-view-toggle__btn${view === "auto-actions" ? " status-view-toggle__btn--active" : ""}`}
+            onClick={() => setView("auto-actions")}
+          >
+            Auto-actions
+          </button>
         </div>
 
         {view === "current" && (
@@ -243,6 +253,8 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
         <div className="modal__body">
           {view === "history" ? (
             <SyncHistoryView />
+          ) : view === "auto-actions" ? (
+            <AutoActionsLog />
           ) : (
             <>
               {error && <div className="status-banner status-banner--error">{error}</div>}
@@ -266,7 +278,15 @@ export default function StatusMonitorModal({ onClose }: { onClose: () => void })
                     <tbody>
                       {filtered.map((s) => (
                         <tr key={s.sourceId}>
-                          <td className="status-table__source">{s.sourceName}</td>
+                          <td className="status-table__source">
+                            {s.sourceName}
+                            {s.dropGuardTriggered && (
+                              <span className="status-table__drop-guard" title="Drop guard rejected this source's removal — listings preserved">
+                                {" "}
+                                🛡 guarded
+                              </span>
+                            )}
+                          </td>
                           <td>
                             <StatusBadge status={s.status} />
                           </td>

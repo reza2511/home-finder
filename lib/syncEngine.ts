@@ -14,6 +14,7 @@ import { dedupeAgainstActiveListings } from "./adapters/dedupe";
 import { upsertListingsForSource } from "./listingsStore";
 import { captureDailyStatsSnapshot } from "./statsStore";
 import { recordSourceRunLog } from "./syncRunLog";
+import { logSyncEvent } from "./dropGuard";
 import type { SourceType, StoredSourceStatus } from "./types";
 
 // Some adapters make several real, sequential HTTP requests (Barratt London:
@@ -51,6 +52,7 @@ interface SyncStatusUpsertRow {
   error_message: string | null;
   extraction_method: string | null;
   deduped_count: number;
+  drop_guard_triggered: boolean;
 }
 
 async function upsertSyncStatus(row: SyncStatusUpsertRow): Promise<void> {
@@ -79,6 +81,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     );
   });
 }
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// One short pause before runOne's own single auto-retry (see its `attempt`
+// param below) — long enough to ride out a fresh network hiccup or a
+// browser-crash-and-relaunch, not a real recovery wait. Same value
+// scripts/run-sync.ts's own per-source retry used to use before this
+// moved to the correct layer — see that script's file header for the
+// change and why duplicating a second retry loop there would risk
+// retrying a source twice over for one transient blip.
+const AUTO_RETRY_DELAY_MS = 5_000;
 
 function classifyFailure(err: unknown): {
   status: "blocked" | "error" | "not_built";
@@ -132,8 +147,13 @@ async function previousLastSuccessAt(sourceId: string): Promise<string | null> {
  * scripts/run-sync.ts specifically. Omitted (undefined) skips history
  * logging entirely rather than inventing a run id — every current caller
  * always supplies one; this is just so a stray future caller degrades
- * gracefully instead of throwing. */
-async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
+ * gracefully instead of throwing.
+ *
+ * `attempt` (default 1) is what caps the 2026-08-25 safe-self-healing
+ * auto-retry at exactly one extra try, later in this same call chain — see
+ * the retry branch in the catch block below. Never set by an external
+ * caller; it only ever advances via this function calling itself once. */
+async function runOne(adapter: SourceAdapter, runId?: string, attempt: number = 1): Promise<void> {
   const startedAt = Date.now();
   const lastRunAt = new Date().toISOString();
 
@@ -188,6 +208,14 @@ async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
     const status: StoredSourceStatus =
       listingsToStore.length === 0 ? "no_results" : "ok";
 
+    if (attempt > 1) {
+      await logSyncEvent(
+        "auto_retry",
+        adapter.id,
+        `Auto-retry succeeded for ${adapter.id} on attempt ${attempt}.`
+      );
+    }
+
     // A run that completed without throwing counts as a "successful run" for
     // staleness purposes, whether or not it found any listings — that's
     // exactly what distinguishes `no_results` (ran fine, found nothing) from
@@ -204,9 +232,19 @@ async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
       updated: diff.updated,
       removed: diff.removed,
       duration_ms: durationMs,
-      error_message: null,
+      // The fetch itself succeeded (hence `status` above), but the drop
+      // guard (lib/dropGuard.ts) may still have refused to apply this
+      // source's removal — surfacing that here, on an otherwise-`ok` row,
+      // is deliberate: it's real information about this run, not an error
+      // in the adapter. drop_guard_triggered (below) is the precise,
+      // structured signal GET /api/health reads; this is just this row's
+      // own human-readable note.
+      error_message: diff.dropGuardTriggered
+        ? "Drop guard rejected this run's removal — existing listings preserved. See sync_events_log / Status Monitor auto-actions for detail."
+        : null,
       extraction_method: result.extractionMethod ?? null,
       deduped_count: dedupedCount,
+      drop_guard_triggered: diff.dropGuardTriggered,
     });
     if (runId) {
       await recordSourceRunLog(runId, {
@@ -225,6 +263,28 @@ async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
     const durationMs = Date.now() - startedAt;
     const { status, httpStatus, message } = classifyFailure(err);
 
+    // Safe self-healing, ONE retry, later in this same call chain — never a
+    // loop, never re-running the whole sync, just this one source: a
+    // genuinely transient-looking failure (classifyFailure's 'error'
+    // bucket — a timeout, a browser crash, a single unexpected 5xx/network
+    // error) gets exactly one more try after a short pause. Deliberately
+    // NOT retried: 'blocked' (a real bot-detection signal — hammering it
+    // again immediately is pointless and can make rate-limiting worse) and
+    // 'not_built' (a stub that always throws by design — a retry can only
+    // ever fail identically). `attempt === 1` is what caps this at exactly
+    // one extra try — the recursive call below always passes attempt + 1,
+    // so a second failure falls straight through to recording it below.
+    if (status === "error" && attempt === 1) {
+      await logSyncEvent(
+        "auto_retry",
+        adapter.id,
+        `Transient-looking error on first attempt for ${adapter.id} (${message}) — retrying once.`,
+        { firstAttemptMessage: message, firstAttemptHttpStatus: httpStatus }
+      );
+      await delay(AUTO_RETRY_DELAY_MS);
+      return runOne(adapter, runId, attempt + 1);
+    }
+
     await upsertSyncStatus({
       source_id: adapter.id,
       source_name: adapter.name,
@@ -237,9 +297,10 @@ async function runOne(adapter: SourceAdapter, runId?: string): Promise<void> {
       updated: 0,
       removed: 0,
       duration_ms: durationMs,
-      error_message: message,
+      error_message: attempt > 1 ? `${message} (after 1 auto-retry)` : message,
       extraction_method: null,
       deduped_count: 0,
+      drop_guard_triggered: false,
     });
     if (runId) {
       await recordSourceRunLog(runId, {

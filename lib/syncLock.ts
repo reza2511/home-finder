@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { requireSupabaseAdmin } from "./db";
+import { logSyncEvent } from "./dropGuard";
 
 /**
  * A single, DB-backed lock (supabase/migrations/0011_sync_lock.sql) that
@@ -125,6 +126,25 @@ export async function acquireSyncLock(
       },
     };
   }
+
+  // Safe self-healing: this caller just auto-cleared a stuck lock (held
+  // past its own staleMs, so no run is genuinely still in progress) simply
+  // by winning the compare-and-swap above — nothing destructive, and
+  // exactly what the staleness fallback was already designed to do (see
+  // STALE_LOCK_MS's own comment). Logged here purely so it's visible in
+  // the Status Monitor's auto-actions list rather than a silent DB write —
+  // best-effort, never lets a logging hiccup affect the lock this function
+  // already successfully took.
+  if (isStale) {
+    const heldForMs = Date.now() - new Date(current.locked_at!).getTime();
+    await logSyncEvent(
+      "auto_lock_clear",
+      null,
+      `Auto-cleared a stale sync lock held by "${current.locked_by ?? "unknown"}" for ${Math.round(heldForMs / 1000)}s (past its ${Math.round(staleMs / 1000)}s staleness limit) — reclaimed by "${label}".`,
+      { previousLockedBy: current.locked_by, previousLockedAt: current.locked_at, heldForMs, staleMs }
+    );
+  }
+
   return { acquired: true, token };
 }
 

@@ -1,6 +1,7 @@
 import { requireSupabaseAdmin } from "./db";
 import { recordRemovedFavourites } from "./favouritesStore";
 import { geocodePostcodes } from "./geocoding";
+import { DROP_GUARD_THRESHOLD_PERCENT, evaluateDropGuard, logSyncEvent, setDropGuardFlag } from "./dropGuard";
 import type { AdapterListing } from "./adapters/types";
 import type { SourceType } from "./types";
 
@@ -8,6 +9,12 @@ export interface DiffResult {
   added: number;
   updated: number;
   removed: number;
+  /** True when this source HAD a real, non-empty candidate removal, but
+   * the site-wide drop guard (lib/dropGuard.ts) rejected it as abnormal —
+   * `removed` is 0 in that case not because nothing looked gone, but
+   * because applying it was refused. See lib/syncEngine.ts's runOne,
+   * which surfaces this on the source's sync_status row. */
+  dropGuardTriggered: boolean;
 }
 
 interface ExistingRow {
@@ -43,6 +50,21 @@ interface ExistingRow {
  * listing for this source untouched (not removed), same as a source that
  * fails outright already does one level up (lib/syncEngine.ts's runOne
  * never calls this function at all when adapter.run() throws).
+ *
+ * 2026-08-25: a second, independent safety net on top of the above — even
+ * a genuinely non-empty `incoming` can still produce a `toRemove` set that
+ * would be abnormally large relative to the whole site (a source's own
+ * parsing silently breaking and returning a real-looking but tiny subset
+ * of its true listings, a page only partially loading before the adapter
+ * gave up, etc.). Before any removal is actually applied, lib/dropGuard.ts's
+ * evaluateDropGuard() checks what applying it would do to the SITE-WIDE
+ * active total — if that drop exceeds DROP_GUARD_THRESHOLD_PERCENT, the
+ * removal is rejected wholesale (every one of `toRemove`, not a partial
+ * application), the existing listings are left exactly as they were, and
+ * the rejection is logged both to sync_events_log (an audit trail) and
+ * sync_health (a persistent "needs attention" flag) — see that module's
+ * own doc comments. This never happens automatically-and-silently-clears:
+ * a human has to acknowledge it (POST /api/health/acknowledge).
  *
  * Writes via the service_role client (requireSupabaseAdmin) since RLS has
  * no anon/authenticated insert or update policy on `listings` — see
@@ -145,8 +167,39 @@ export async function upsertListingsForSource(
   // empty `incoming` — that would mean "found nothing" and "genuinely gone"
   // are treated identically, which is exactly the failure mode being
   // guarded against here.
-  const toRemove =
+  let toRemove =
     incoming.length > 0 ? [...activeIds].filter((id) => !incomingIds.has(id)) : [];
+
+  let dropGuardTriggered = false;
+  if (toRemove.length > 0) {
+    const guard = await evaluateDropGuard(toRemove.length);
+    if (!guard.allowed) {
+      dropGuardTriggered = true;
+      const message =
+        `Sync rejected — abnormal drop of ${guard.dropPercent.toFixed(1)}%, listings preserved ` +
+        `(source: ${sourceId}, would-remove ${guard.candidateRemovedCount} of ${guard.previousActiveTotal} ` +
+        `site-wide active listings, threshold ${DROP_GUARD_THRESHOLD_PERCENT}%)`;
+      console.warn(`[dropGuard] ${message}`);
+      // Fire-and-record in parallel: neither write should block or fail the
+      // other, and either failing is already best-effort/non-fatal on its
+      // own (see logSyncEvent/setDropGuardFlag's own comments) — the actual
+      // protection (not applying `toRemove` below) doesn't depend on either
+      // succeeding.
+      await Promise.all([
+        logSyncEvent("drop_guard_rejected", sourceId, message, {
+          previousActiveTotal: guard.previousActiveTotal,
+          candidateRemovedCount: guard.candidateRemovedCount,
+          dropPercent: guard.dropPercent,
+          thresholdPercent: DROP_GUARD_THRESHOLD_PERCENT,
+        }),
+        setDropGuardFlag(message),
+      ]);
+      // Do NOT apply the mass removal — every previously-active listing for
+      // this source stays exactly as it was.
+      toRemove = [];
+    }
+  }
+
   if (toRemove.length > 0) {
     const { error: removeErr } = await admin
       .from("listings")
@@ -172,5 +225,5 @@ export async function upsertListingsForSource(
     );
   }
 
-  return { added, updated, removed: toRemove.length };
+  return { added, updated, removed: toRemove.length, dropGuardTriggered };
 }

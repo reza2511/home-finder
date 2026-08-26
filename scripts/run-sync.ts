@@ -99,6 +99,18 @@ const OUTER_TIMEOUT_MS = ADAPTER_TIMEOUT_MS + 120_000;
 // runner's clock still settling, a momentary network hiccup), not for
 // anything that takes real recovery time. A source that fails twice in a
 // row is genuinely broken for this run, not just unlucky.
+//
+// 2026-08-25: lib/syncEngine.ts's runOne() now ALSO retries once, at a
+// narrower layer — a single adapter's own thrown error (timeout, browser
+// crash, a 5xx). That's not a duplicate of this loop: runOne() already
+// catches every one of its own failures internally and never rethrows
+// them here (true before this change too — see runOne's try/catch), so
+// this outer retry only ever fires for a failure OUTSIDE a single
+// adapter's run: pruneUnknownSources() itself throwing (the original
+// "JWT issued at future" clock-skew incident this loop was built for —
+// see the file header's "Exit code" note), or the outer per-source
+// timeout below actually firing. Two different failure classes, two
+// different layers — neither retry can trigger the other.
 const RETRY_DELAY_MS = 5_000;
 
 function withOuterTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {

@@ -5,6 +5,7 @@ import { fetchStatus } from "@/lib/statusClient";
 import { fetchSession, logout } from "@/lib/authClient";
 import { clearCache } from "@/lib/cacheClient";
 import HamburgerMenu from "./HamburgerMenu";
+import HealthIndicator from "./HealthIndicator";
 import type { StatusSummary } from "@/lib/types";
 
 // onOpenStatus is optional so pages other than the home page (e.g.
@@ -125,6 +126,7 @@ export default function Header({
         </div>
       </div>
       <div className="app-header__actions">
+        <HealthIndicator authenticated={authenticated} />
         {onClearCache && (
           <span className="clear-cache">
             <button

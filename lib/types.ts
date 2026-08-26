@@ -32,6 +32,11 @@ export interface SyncStatusRow {
    * developer source itself; only aggregators (1newhomes, Benhams) ever
    * dedupe. See lib/adapters/dedupe.ts. */
   dedupedCount: number;
+  /** True when this source's most recent run had a removal the drop guard
+   * (lib/dropGuard.ts) rejected as abnormal — its existing listings were
+   * preserved rather than removed. See GET /api/health for the site-wide
+   * version of this same flag. */
+  dropGuardTriggered: boolean;
 }
 
 export interface StatusSummary {
@@ -146,4 +151,42 @@ export interface Listing {
  * supabase/migrations/0008_add_listing_removed_at.sql. */
 export interface RemovedListing extends Listing {
   removedAt: string;
+}
+
+/** GET /api/health's overall verdict. "green" only when every one of
+ * lib/dropGuard.ts's checks passes; "red" the moment any one doesn't —
+ * see that route's own doc comment for the exact conditions. */
+export type HealthStatus = "green" | "red";
+
+export interface HealthResponse {
+  status: HealthStatus;
+  /** Short, human-readable reasons behind `status` — always at least one
+   * entry, green or red (e.g. "Last sync OK, 1,477 listings" when green). */
+  reasons: string[];
+  /** True only for a red condition a human has to resolve (currently: the
+   * drop guard triggered) — as opposed to a red condition later syncs can
+   * resolve on their own (a source that's merely gone stale, say). Drives
+   * the health sign's distinct "needs my attention" styling. */
+  needsAttention: boolean;
+  totalActive: number;
+  dropGuardActive: boolean;
+  dropGuardMessage: string | null;
+  dropGuardTriggeredAt: string | null;
+  /** Registered sources with zero active listings right now — the exact
+   * shape of the 2026-08-25 incident this whole feature set exists
+   * because of. Empty in the normal case. */
+  emptySources: { sourceId: string; sourceName: string }[];
+}
+
+/** One row from sync_events_log (supabase/migrations/0013_reliability.sql)
+ * — an audit entry for an automatic action the sync machinery took
+ * without a human clicking a button. See lib/dropGuard.ts's logSyncEvent
+ * (the only writer) and GET /api/sync-events (the only reader). */
+export interface SyncEvent {
+  id: string;
+  createdAt: string;
+  eventType: "drop_guard_rejected" | "auto_retry" | "auto_lock_clear";
+  sourceId: string | null;
+  message: string;
+  details: Record<string, unknown> | null;
 }
