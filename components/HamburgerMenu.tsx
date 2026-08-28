@@ -46,6 +46,9 @@ export default function HamburgerMenu() {
           <a href="/compare" role="menuitem" className="hamburger-menu__item">
             Compare properties
           </a>
+          <a href="/property-tracker" role="menuitem" className="hamburger-menu__item">
+            Property Tracker
+          </a>
           <a href="/favourites" role="menuitem" className="hamburger-menu__item">
             Favourites
           </a>

@@ -2,9 +2,11 @@
   "functions": {
     "app/api/sync/route.ts": { "memory": 1536 },
     "app/api/status/route.ts": { "memory": 1536 },
-    "app/api/compare/route.ts": { "memory": 1536 }
+    "app/api/compare/route.ts": { "memory": 1536 },
+    "app/api/tracker/route.ts": { "memory": 1536 }
   },
   "crons": [
-    { "path": "/api/cron/history-snapshot", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/history-snapshot", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/tracker-backup", "schedule": "0 7 * * *" }
   ]
 }

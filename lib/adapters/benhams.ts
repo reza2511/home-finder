@@ -176,15 +176,33 @@ export const benhamsAdapter: SourceAdapter = {
         throw new AdapterHttpError(`Benhams new-homes page: unexpected HTTP ${httpStatus}`, httpStatus, initialHtml.slice(0, 500));
       }
 
+      // 2026-08-26: confirmed live this can genuinely time out on a slow
+      // render even though the page is fine — 30s wasn't always enough,
+      // and when it wasn't, every subsequent "Load more" click below was
+      // fired at a page that hadn't really settled yet, and the incident
+      // this comment documents saw the very first click add zero new
+      // cards and the loop give up right there (32 of a real ~284
+      // total). 45s gives real slow loads more room before falling back
+      // to whatever DID render.
       let resultsAppeared = true;
       try {
-        await page.waitForSelector(`${CARD_SELECTOR}, text=/£\\s?\\d/`, { timeout: 30_000 });
+        await page.waitForSelector(`${CARD_SELECTOR}, text=/£\\s?\\d/`, { timeout: 45_000 });
       } catch {
         resultsAppeared = false;
-        console.warn("[benhams] no result card / £-price appeared within 30000ms");
+        console.warn("[benhams] no result card / £-price appeared within 45000ms");
       }
 
       // CRITICAL: click "Load more" until it's gone or stops adding cards.
+      //
+      // 2026-08-26: a real run's very first click added 0 new cards (32 ->
+      // 32) and the loop stopped there, leaving only ~32 of the page's own
+      // stated ~284 developments — later confirmed the site itself hadn't
+      // failed at all, this crawler just gave up one click too early on a
+      // slow-to-respond page. A "no growth" click is now given ONE retry
+      // (a longer pause, then the same click again) before it's trusted as
+      // "reached the real end" — a genuine end (the button gone/hidden) is
+      // unaffected, since that's caught by the `visible` check above this
+      // loop, not by card-count growth.
       let clicks = 0;
       let lastCardCount = await page.locator(CARD_SELECTOR).count().catch(() => 0);
       for (; clicks < MAX_LOAD_MORE_CLICKS; ) {
@@ -196,12 +214,21 @@ export const benhamsAdapter: SourceAdapter = {
         clicks++;
         await page.waitForTimeout(900);
 
-        const newCardCount = await page.locator(CARD_SELECTOR).count().catch(() => lastCardCount);
+        let newCardCount = await page.locator(CARD_SELECTOR).count().catch(() => lastCardCount);
         if (newCardCount <= lastCardCount) {
           console.warn(
-            `[benhams] "Load more" click ${clicks} added no new cards (${lastCardCount} → ${newCardCount}) — stopping`
+            `[benhams] "Load more" click ${clicks} added no new cards (${lastCardCount} → ${newCardCount}) — ` +
+              `retrying once after a longer pause before treating this as the real end`
           );
-          break;
+          await page.waitForTimeout(2500);
+          newCardCount = await page.locator(CARD_SELECTOR).count().catch(() => lastCardCount);
+          if (newCardCount <= lastCardCount) {
+            console.warn(
+              `[benhams] retry still added no new cards (${lastCardCount} → ${newCardCount}) — stopping for real`
+            );
+            break;
+          }
+          console.warn(`[benhams] retry recovered: ${lastCardCount} → ${newCardCount}`);
         }
         lastCardCount = newCardCount;
       }
