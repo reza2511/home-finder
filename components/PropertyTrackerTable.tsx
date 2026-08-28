@@ -73,8 +73,17 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
                   </a>
                 </div>
                 {row.extractionNote && (
-                  <div className="tracker-table__note" title={row.extractionNote}>
-                    ⚠ Couldn&apos;t read this page — fill in manually
+                  <div
+                    className={
+                      row.extractionNote.startsWith("Couldn't read")
+                        ? "tracker-table__note tracker-table__note--error"
+                        : "tracker-table__note tracker-table__note--info"
+                    }
+                    title={row.extractionNote}
+                  >
+                    {row.extractionNote.startsWith("Couldn't read")
+                      ? "⚠ Couldn't read this page — fill in manually"
+                      : "ℹ AI extraction unavailable — some fields may be missing"}
                   </div>
                 )}
               </td>

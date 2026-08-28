@@ -2099,8 +2099,15 @@ button {
 .tracker-table__note {
   margin-top: 4px;
   font-size: 11px;
-  color: var(--color-stale-text);
   cursor: help;
+}
+
+.tracker-table__note--error {
+  color: var(--color-danger-text);
+}
+
+.tracker-table__note--info {
+  color: var(--color-stale-text);
 }
 
 .tracker-table__check-cell {

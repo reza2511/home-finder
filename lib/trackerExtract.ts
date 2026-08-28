@@ -21,6 +21,7 @@
  */
 import { withBrowser } from "./adapters/browser";
 import { isBotBlockSignal } from "./adapters/blockDetection";
+import { extractStructuredFields } from "./trackerStructuredExtract";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const GOTO_TIMEOUT_MS = 60_000;
@@ -51,7 +52,7 @@ export interface TrackerExtractedFields {
 }
 
 export type TrackerExtractResult =
-  | { status: "ok"; fields: TrackerExtractedFields }
+  | { status: "ok"; fields: TrackerExtractedFields; warning?: string }
   | { status: "blocked" | "error"; message: string };
 
 const FIELD_KEYS: (keyof TrackerExtractedFields)[] = [
@@ -259,23 +260,58 @@ export async function extractTrackerFieldsFromUrl(url: string): Promise<TrackerE
     return { status: "blocked", message: "This site blocked the request (bot-detection/challenge page)." };
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return { status: "error", message: "AI extraction is not configured (ANTHROPIC_API_KEY is not set)." };
-  }
-
   const { visibleText, strippedHtml } = prepareAiInput(page.html);
   if (visibleText.length < 50) {
     return { status: "error", message: "The page loaded but had no readable content to extract from." };
   }
 
-  let raw: unknown;
-  try {
-    raw = await callAnthropic(apiKey, visibleText, strippedHtml, parsed.toString());
-  } catch (err) {
-    return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  // Structured data first (JSON-LD / embedded JSON) — reads real fields
+  // directly off the page with no AI call at all, so a page like a Barratt
+  // plot listing (schema.org data present, but not in a shape the AI-only
+  // path even needs) still extracts when the Anthropic API is unavailable
+  // (no key, no credit, rate-limited, etc). Every value is re-grounded
+  // against the same visible text the AI path grounds against — reading it
+  // structurally is a reliability improvement, not a looser trust bar.
+  const structuredRaw = extractStructuredFields(page.html, visibleText);
+  const structured = normalizeAndGroundFields(structuredRaw, visibleText);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  let aiFields: TrackerExtractedFields | null = null;
+  let aiFailureMessage: string | null = null;
+  if (!apiKey) {
+    aiFailureMessage = "AI extraction is not configured (ANTHROPIC_API_KEY is not set).";
+  } else {
+    try {
+      const raw = await callAnthropic(apiKey, visibleText, strippedHtml, parsed.toString());
+      aiFields = normalizeAndGroundFields(raw, visibleText);
+    } catch (err) {
+      aiFailureMessage = err instanceof Error ? err.message : String(err);
+    }
   }
 
-  const fields = normalizeAndGroundFields(raw, visibleText);
-  return { status: "ok", fields };
+  // Structured data wins where both found something (schema.org/embedded
+  // JSON is a harder, more precise source than the AI's free-text read);
+  // the AI fills in whatever structured data didn't find.
+  const fields = {} as TrackerExtractedFields;
+  for (const key of FIELD_KEYS) {
+    fields[key] = structured[key] ?? aiFields?.[key] ?? null;
+  }
+
+  const foundAnything = FIELD_KEYS.some((key) => fields[key] !== null);
+  if (!foundAnything) {
+    // Genuinely nothing came through either path — report the AI's failure
+    // (the more informative of the two "found nothing" reasons) rather than
+    // a generic "couldn't read", same as this function always has.
+    return { status: "error", message: aiFailureMessage ?? "No fields could be extracted from this page." };
+  }
+
+  // Some real, grounded fields were found even though the AI step didn't
+  // contribute (missing key, no credit, API error, etc) — surfaced as an
+  // informational warning, not a failure: the row still gets genuinely
+  // read data, just possibly less complete than the AI would have added.
+  const warning = aiFailureMessage
+    ? `Read this page's own structured data directly; AI extraction was unavailable (${aiFailureMessage}) — some fields may still need filling in manually.`
+    : undefined;
+
+  return { status: "ok", fields, warning };
 }

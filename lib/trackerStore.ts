@@ -96,7 +96,8 @@ export async function createTrackerRow(url: string): Promise<TrackerRow> {
     address: result.status === "ok" ? (result.fields.address ?? "") : "",
     area: result.status === "ok" ? (result.fields.area ?? "") : "",
     postcode: result.status === "ok" ? (result.fields.postcode ?? "") : "",
-    extraction_note: result.status === "ok" ? null : `Couldn't read this page — ${result.message}`,
+    extraction_note:
+      result.status === "ok" ? (result.warning ?? null) : `Couldn't read this page — ${result.message}`,
   };
 
   const { data, error } = await admin
