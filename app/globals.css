@@ -2096,6 +2096,36 @@ button {
   pointer-events: none;
 }
 
+.tracker-table__video-cell {
+  min-width: 170px;
+}
+
+.tracker-table__video-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tracker-table__video-link {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tracker-table__video-link:hover {
+  text-decoration: underline;
+}
+
+.tracker-table__video-placeholder {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .tracker-table__note {
   margin-top: 4px;
   font-size: 11px;
@@ -2120,11 +2150,26 @@ button {
   height: 16px;
 }
 
+/* Deliberately NOT display:flex on the <td> itself — setting flex directly
+   on a table cell overrides its default display:table-cell, which pulls it
+   out of the table's normal row-height/border layout and is exactly what
+   made this column stop lining up with the rest of the row (confirmed:
+   this was the actual bug, not a spacing/padding issue) — most visible
+   once a row grows taller than the others (a resized comment textarea, or
+   just a normal row next to one that hasn't). The <td> keeps the ordinary
+   table-cell display (and the same vertical-align: top every other cell
+   already gets from the general .tracker-table td rule, so the × sits at
+   the same vertical position as every other cell's input, rejected-red or
+   not, tall comment or not); only the small icon+button ROW inside it
+   (.tracker-table__actions-inner) is a flexbox. */
 .tracker-table__actions-cell {
+  white-space: nowrap;
+}
+
+.tracker-table__actions-inner {
   display: flex;
   align-items: center;
   gap: 6px;
-  white-space: nowrap;
 }
 
 .tracker-table__saving {

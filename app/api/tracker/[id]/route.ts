@@ -13,7 +13,19 @@ function requireAuth(): NextResponse | null {
   return null;
 }
 
-const STRING_FIELDS = ["url", "price", "bedrooms", "floor", "developer", "address", "area", "postcode", "comment"] as const;
+const STRING_FIELDS = [
+  "url",
+  "name",
+  "price",
+  "bedrooms",
+  "floor",
+  "developer",
+  "address",
+  "area",
+  "postcode",
+  "comment",
+  "video",
+] as const;
 const BOOL_FIELDS = ["rejected", "viewed", "contactedAgent"] as const;
 
 /** Builds a whitelisted patch from an arbitrary request body — any key

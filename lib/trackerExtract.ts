@@ -40,6 +40,8 @@ const BROWSER_HEADERS: Record<string, string> = {
 };
 
 export interface TrackerExtractedFields {
+  /** The property/development's own name/title, if the page states one. */
+  name: string | null;
   price: string | null;
   bedrooms: string | null;
   /** Which floor the unit itself is on (e.g. "3rd floor", "Ground floor") —
@@ -56,6 +58,7 @@ export type TrackerExtractResult =
   | { status: "blocked" | "error"; message: string };
 
 const FIELD_KEYS: (keyof TrackerExtractedFields)[] = [
+  "name",
   "price",
   "bedrooms",
   "floor",
@@ -165,9 +168,10 @@ function isGrounded(value: string, visibleText: string): boolean {
   return normalizeForGrounding(visibleText).includes(normalizedValue);
 }
 
-const PROMPT = `You are extracting structured facts about ONE property listing from the page content below. For each of these 7 fields, give the value EXACTLY as stated on the page (copy the page's own wording/formatting), or null if the page does not genuinely state it. Never guess, estimate, or infer a value that isn't actually written on the page.
+const PROMPT = `You are extracting structured facts about ONE property listing from the page content below. For each of these 8 fields, give the value EXACTLY as stated on the page (copy the page's own wording/formatting), or null if the page does not genuinely state it. Never guess, estimate, or infer a value that isn't actually written on the page.
 
 Fields:
+- name: the property or development's own name/title, if stated
 - price: the current asking/listed price, as stated
 - bedrooms: number of bedrooms, as stated (e.g. "2", "Studio")
 - floor: which floor the specific unit/apartment is on, if stated (e.g. "3rd floor", "Ground floor", "Penthouse") — this is about the unit's floor level, NOT the floor area/size
@@ -176,7 +180,7 @@ Fields:
 - area: the general area, neighbourhood, or town
 - postcode: a postcode, if stated
 
-Respond with ONLY a single JSON object with exactly these 7 keys (price, bedrooms, floor, developer, address, area, postcode), each a string or null. No markdown, no commentary, no code fences.`;
+Respond with ONLY a single JSON object with exactly these 8 keys (name, price, bedrooms, floor, developer, address, area, postcode), each a string or null. No markdown, no commentary, no code fences.`;
 
 async function callAnthropic(apiKey: string, visibleText: string, strippedHtml: string, pageUrl: string): Promise<unknown> {
   const res = await fetch(ANTHROPIC_API_URL, {

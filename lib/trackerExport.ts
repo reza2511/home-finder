@@ -3,6 +3,7 @@ import type { TrackerRow } from "./trackerTypes";
 
 const HEADER = [
   "Link",
+  "Name",
   "Price",
   "Bedrooms",
   "Floor",
@@ -12,6 +13,7 @@ const HEADER = [
   "Area",
   "Postcode",
   "Comment",
+  "Video",
   "Rejected",
   "Viewed",
   "Contacted agent",
@@ -28,6 +30,7 @@ export function exportTrackerToExcel(rows: TrackerRow[]): void {
     HEADER,
     ...rows.map((r) => [
       r.url,
+      r.name,
       r.price,
       r.bedrooms,
       r.floor,
@@ -37,6 +40,7 @@ export function exportTrackerToExcel(rows: TrackerRow[]): void {
       r.area,
       r.postcode,
       r.comment,
+      r.video,
       r.rejected ? "Yes" : "No",
       r.viewed ? "Yes" : "No",
       r.contactedAgent ? "Yes" : "No",

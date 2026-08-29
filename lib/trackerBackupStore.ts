@@ -19,6 +19,7 @@ import type { TrackerBackupSummary, TrackerRow } from "./trackerTypes";
 interface TrackerRowDb {
   id: string;
   url: string;
+  name: string;
   price: string;
   bedrooms: string;
   floor: string;
@@ -28,6 +29,7 @@ interface TrackerRowDb {
   area: string;
   postcode: string;
   comment: string;
+  video: string;
   rejected: boolean;
   viewed: boolean;
   contacted_agent: boolean;
@@ -37,7 +39,7 @@ interface TrackerRowDb {
 }
 
 const SELECT_COLUMNS =
-  "id, url, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, rejected, viewed, contacted_agent, extraction_note, created_at, updated_at";
+  "id, url, name, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, video, rejected, viewed, contacted_agent, extraction_note, created_at, updated_at";
 
 /** Captures every current property_tracker row into today's (UTC)
  * backup row, upserting on (user_id, date). Used by both the daily cron and
@@ -129,6 +131,7 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
         id: r.id,
         user_id: FIXED_USER_ID,
         url: r.url,
+        name: r.name,
         price: r.price,
         bedrooms: r.bedrooms,
         floor: r.floor,
@@ -138,6 +141,7 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
         area: r.area,
         postcode: r.postcode,
         comment: r.comment,
+        video: r.video,
         rejected: r.rejected,
         viewed: r.viewed,
         contacted_agent: r.contacted_agent,
@@ -161,6 +165,7 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
   return (restored ?? []).map((row) => ({
     id: row.id,
     url: row.url,
+    name: row.name,
     price: row.price,
     bedrooms: row.bedrooms,
     floor: row.floor,
@@ -170,6 +175,7 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
     area: row.area,
     postcode: row.postcode,
     comment: row.comment,
+    video: row.video,
     rejected: row.rejected,
     viewed: row.viewed,
     contactedAgent: row.contacted_agent,

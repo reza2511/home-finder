@@ -6,6 +6,12 @@
 export interface TrackerRow {
   id: string;
   url: string;
+  /** The property/development's own name — pre-filled by the extraction
+   * step when the pasted page states one, left blank otherwise for the
+   * operator to type themselves (unlike the other AI-extracted fields,
+   * this one is also meant to be hand-typed when extraction can't find
+   * it, not just a fallback for a failed read). */
+  name: string;
   price: string;
   bedrooms: string;
   floor: string;
@@ -16,6 +22,9 @@ export interface TrackerRow {
   area: string;
   postcode: string;
   comment: string;
+  /** A video link (YouTube, Google Drive, or any URL) the operator pastes
+   * in themselves — never scraped, same as comment/viewDate. */
+  video: string;
   rejected: boolean;
   viewed: boolean;
   contactedAgent: boolean;
@@ -36,6 +45,7 @@ export type TrackerRowPatch = Partial<
   Pick<
     TrackerRow,
     | "url"
+    | "name"
     | "price"
     | "bedrooms"
     | "floor"
@@ -45,6 +55,7 @@ export type TrackerRowPatch = Partial<
     | "area"
     | "postcode"
     | "comment"
+    | "video"
     | "rejected"
     | "viewed"
     | "contactedAgent"

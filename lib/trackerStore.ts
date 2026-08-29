@@ -15,6 +15,7 @@ export const FIXED_USER_ID = "reza"; // the one account lib/auth.ts ever authent
 interface TrackerRowDb {
   id: string;
   url: string;
+  name: string;
   price: string;
   bedrooms: string;
   floor: string;
@@ -24,6 +25,7 @@ interface TrackerRowDb {
   area: string;
   postcode: string;
   comment: string;
+  video: string;
   rejected: boolean;
   viewed: boolean;
   contacted_agent: boolean;
@@ -36,6 +38,7 @@ function fromDb(row: TrackerRowDb): TrackerRow {
   return {
     id: row.id,
     url: row.url,
+    name: row.name,
     price: row.price,
     bedrooms: row.bedrooms,
     floor: row.floor,
@@ -45,6 +48,7 @@ function fromDb(row: TrackerRowDb): TrackerRow {
     area: row.area,
     postcode: row.postcode,
     comment: row.comment,
+    video: row.video,
     rejected: row.rejected,
     viewed: row.viewed,
     contactedAgent: row.contacted_agent,
@@ -55,7 +59,7 @@ function fromDb(row: TrackerRowDb): TrackerRow {
 }
 
 const SELECT_COLUMNS =
-  "id, url, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, rejected, viewed, contacted_agent, extraction_note, created_at, updated_at";
+  "id, url, name, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, video, rejected, viewed, contacted_agent, extraction_note, created_at, updated_at";
 
 /** Every tracker row for the fixed account, ordered so the table can render
  * them directly: not-rejected before rejected, each group oldest-added
@@ -89,6 +93,7 @@ export async function createTrackerRow(url: string): Promise<TrackerRow> {
   const insertRow = {
     user_id: FIXED_USER_ID,
     url,
+    name: result.status === "ok" ? (result.fields.name ?? "") : "",
     price: result.status === "ok" ? (result.fields.price ?? "") : "",
     bedrooms: result.status === "ok" ? (result.fields.bedrooms ?? "") : "",
     floor: result.status === "ok" ? (result.fields.floor ?? "") : "",
@@ -113,6 +118,7 @@ export async function createTrackerRow(url: string): Promise<TrackerRow> {
 
 const PATCH_KEY_TO_COLUMN: Record<keyof TrackerRowPatch, string> = {
   url: "url",
+  name: "name",
   price: "price",
   bedrooms: "bedrooms",
   floor: "floor",
@@ -122,6 +128,7 @@ const PATCH_KEY_TO_COLUMN: Record<keyof TrackerRowPatch, string> = {
   area: "area",
   postcode: "postcode",
   comment: "comment",
+  video: "video",
   rejected: "rejected",
   viewed: "viewed",
   contactedAgent: "contacted_agent",

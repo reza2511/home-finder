@@ -102,9 +102,29 @@ interface JsonLdResult {
  * wins, in document order. A single-property page normally has at most one
  * block that states any of these at all (Organization/BreadcrumbList blocks
  * never do), so there's little real ambiguity to resolve. */
+/** BreadcrumbList's own trail of page titles (e.g. "New Homes" > "Lightmakers"
+ * > "Plot 2") — genuinely visible UI text on almost every real estate site,
+ * unlike a property node's own `name` field, which confirmed live can bundle
+ * in an internal plot/SKU code (Barratt's "Lightmakers - Plot 2 H86102" —
+ * "H86102" is never actually shown anywhere on the page) that fails
+ * grounding and throws the WHOLE name away. Joins the last two breadcrumb
+ * items (typically "Development" + "Plot/Unit") into a clean, always-
+ * groundable name; falls back to just the last item if there's only one. */
+function nameFromBreadcrumb(node: Record<string, unknown>): string | null {
+  const items = node.itemListElement;
+  if (!Array.isArray(items)) return null;
+  const names = items
+    .map((item) => (item && typeof item === "object" ? firstNonEmptyString((item as Record<string, unknown>).name) : null))
+    .filter((n): n is string => !!n);
+  if (names.length === 0) return null;
+  return names.length >= 2 ? names.slice(-2).join(" - ") : names[0];
+}
+
 function extractFromJsonLd(html: string): JsonLdResult {
   const fields: Partial<TrackerExtractedFields> = {};
   const ownTextParts: string[] = [];
+  let nodeNameCandidate: string | null = null;
+  let breadcrumbName: string | null = null;
   const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let m: RegExpExecArray | null;
 
@@ -133,25 +153,42 @@ function extractFromJsonLd(html: string): JsonLdResult {
         else if (typeof roomsRaw === "string" && roomsRaw.trim() !== "") fields.bedrooms = roomsRaw.trim();
       }
 
+      const type = typeNameOf(node);
+
       // An Organization node (Barratt London, Berkeley Group, etc.) is the
       // one JSON-LD shape that reliably names the developer/builder itself,
       // as opposed to the specific property/branch (LocalBusiness et al).
-      if (fields.developer == null && typeNameOf(node) === "organization") {
+      if (fields.developer == null && type === "organization") {
         fields.developer = firstNonEmptyString(node.name);
       }
 
+      if (type === "breadcrumblist") {
+        breadcrumbName ??= nameFromBreadcrumb(node);
+      }
+
       const name = firstNonEmptyString(node.name);
+      // A fallback name candidate from whichever non-Organization/
+      // BreadcrumbList node names THIS listing — used only if there's no
+      // BreadcrumbList to build a safer name from (breadcrumbName always
+      // wins below when present).
+      if (nodeNameCandidate == null && type !== "organization" && type !== "breadcrumblist") {
+        nodeNameCandidate = name;
+      }
+
       const description = firstNonEmptyString(node.description);
       if (name) ownTextParts.push(name);
       if (description) ownTextParts.push(description);
     }
   }
 
+  fields.name = breadcrumbName ?? nodeNameCandidate;
+
   return { fields, ownText: ownTextParts.join(" ") };
 }
 
 // ---------- embedded JSON (Next.js __NEXT_DATA__ / common global-state blobs) ----------
 
+const NAME_KEYS = ["name", "title", "developmentName", "propertyName"];
 const PRICE_KEYS = ["price", "Price", "askingPrice", "guidePrice", "priceGBP"];
 const POSTCODE_KEYS = ["postcode", "postCode", "postalCode", "zip"];
 const AREA_KEYS = ["area", "town", "locality", "suburb", "district"];
@@ -230,6 +267,7 @@ function extractFromEmbeddedJson(html: string): Partial<TrackerExtractedFields> 
   for (const candidate of candidates) {
     const obj = findPropertyObject(candidate);
     if (!obj) continue;
+    fields.name ??= pickString(obj, NAME_KEYS);
     fields.price ??= pickString(obj, PRICE_KEYS);
     fields.postcode ??= pickString(obj, POSTCODE_KEYS);
     fields.area ??= pickString(obj, AREA_KEYS);
@@ -318,6 +356,7 @@ export function extractStructuredFields(html: string, visibleText: string): Part
   const jsonLd = extractFromJsonLd(html);
   const embedded = extractFromEmbeddedJson(html);
   const fields: Partial<TrackerExtractedFields> = {
+    name: jsonLd.fields.name ?? embedded.name ?? null,
     price: jsonLd.fields.price ?? embedded.price ?? null,
     address: jsonLd.fields.address ?? embedded.address ?? null,
     postcode: jsonLd.fields.postcode ?? embedded.postcode ?? null,

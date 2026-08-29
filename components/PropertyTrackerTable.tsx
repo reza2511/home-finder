@@ -36,11 +36,13 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
         <thead>
           <tr>
             <th>Link</th>
+            <th>Name</th>
             {TEXT_FIELDS.map((f) => (
               <th key={f.key}>{f.label}</th>
             ))}
             <th>View date</th>
             <th>Comment</th>
+            <th>Video</th>
             <th>Rejected</th>
             <th>Viewed</th>
             <th>Contacted agent</th>
@@ -88,6 +90,16 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
                 )}
               </td>
 
+              <td>
+                <input
+                  type="text"
+                  className="tracker-table__input"
+                  value={row.name}
+                  placeholder="Property name"
+                  onChange={(e) => onEdit(row.id, { name: e.target.value })}
+                />
+              </td>
+
               {TEXT_FIELDS.map((f) => (
                 <td key={f.key}>
                   <input
@@ -117,6 +129,25 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
                 />
               </td>
 
+              <td className="tracker-table__video-cell">
+                <div className="tracker-table__video-row">
+                  <input
+                    type="text"
+                    className="tracker-table__input tracker-table__input--url"
+                    value={row.video}
+                    placeholder="Paste video link"
+                    onChange={(e) => onEdit(row.id, { video: e.target.value })}
+                  />
+                  {row.video ? (
+                    <a href={row.video} target="_blank" rel="noreferrer" className="tracker-table__video-link">
+                      ▶ View video
+                    </a>
+                  ) : (
+                    <span className="tracker-table__video-placeholder">Add video</span>
+                  )}
+                </div>
+              </td>
+
               <td className="tracker-table__check-cell">
                 <input
                   type="checkbox"
@@ -143,20 +174,22 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
               </td>
 
               <td className="tracker-table__actions-cell">
-                {savingIds.has(row.id) && (
-                  <span className="tracker-table__saving" title="Saving…" aria-label="Saving">
-                    ●
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className="tracker-table__remove"
-                  onClick={() => onDelete(row.id)}
-                  aria-label="Remove row"
-                  title="Remove this row"
-                >
-                  ×
-                </button>
+                <div className="tracker-table__actions-inner">
+                  {savingIds.has(row.id) && (
+                    <span className="tracker-table__saving" title="Saving…" aria-label="Saving">
+                      ●
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="tracker-table__remove"
+                    onClick={() => onDelete(row.id)}
+                    aria-label="Remove row"
+                    title="Remove this row"
+                  >
+                    ×
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
