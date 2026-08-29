@@ -23,6 +23,16 @@ const TEXT_FIELDS: { key: keyof TrackerRowPatch; label: string; placeholder?: st
   { key: "postcode", label: "Postcode" },
 ];
 
+/** Row colour priority: Rejected (red) always wins over Interested (light
+ * orange) when a row is both — decided once, here, in plain JS rather than
+ * leaning on CSS cascade/specificity between two classes, so there's exactly
+ * one place that ever has to agree on the ordering. */
+function rowClassName(row: TrackerRow): string {
+  if (row.rejected) return "tracker-table__row--rejected";
+  if (row.interested) return "tracker-table__row--interested";
+  return "";
+}
+
 export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds }: Props) {
   const sorted = sortTrackerRows(rows);
 
@@ -46,12 +56,14 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
             <th>Rejected</th>
             <th>Viewed</th>
             <th>Contacted agent</th>
+            <th>Awaiting agent call</th>
+            <th>Interested</th>
             <th aria-label="Remove"></th>
           </tr>
         </thead>
         <tbody>
           {sorted.map((row) => (
-            <tr key={row.id} className={row.rejected ? "tracker-table__row--rejected" : ""}>
+            <tr key={row.id} className={rowClassName(row)}>
               <td className="tracker-table__link-cell">
                 <div className="tracker-table__link-row">
                   <input
@@ -170,6 +182,22 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
                   checked={row.contactedAgent}
                   onChange={(e) => onEdit(row.id, { contactedAgent: e.target.checked })}
                   aria-label="Contacted agent"
+                />
+              </td>
+              <td className="tracker-table__check-cell">
+                <input
+                  type="checkbox"
+                  checked={row.awaitingAgentCall}
+                  onChange={(e) => onEdit(row.id, { awaitingAgentCall: e.target.checked })}
+                  aria-label="Awaiting agent call"
+                />
+              </td>
+              <td className="tracker-table__check-cell">
+                <input
+                  type="checkbox"
+                  checked={row.interested}
+                  onChange={(e) => onEdit(row.id, { interested: e.target.checked })}
+                  aria-label="Interested"
                 />
               </td>
 

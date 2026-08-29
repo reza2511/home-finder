@@ -33,13 +33,15 @@ interface TrackerRowDb {
   rejected: boolean;
   viewed: boolean;
   contacted_agent: boolean;
+  awaiting_agent_call: boolean;
+  interested: boolean;
   extraction_note: string | null;
   created_at: string;
   updated_at: string;
 }
 
 const SELECT_COLUMNS =
-  "id, url, name, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, video, rejected, viewed, contacted_agent, extraction_note, created_at, updated_at";
+  "id, url, name, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, video, rejected, viewed, contacted_agent, awaiting_agent_call, interested, extraction_note, created_at, updated_at";
 
 /** Captures every current property_tracker row into today's (UTC)
  * backup row, upserting on (user_id, date). Used by both the daily cron and
@@ -145,6 +147,8 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
         rejected: r.rejected,
         viewed: r.viewed,
         contacted_agent: r.contacted_agent,
+        awaiting_agent_call: r.awaiting_agent_call,
+        interested: r.interested,
         extraction_note: r.extraction_note,
         created_at: r.created_at,
         updated_at: r.updated_at,
@@ -179,6 +183,8 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
     rejected: row.rejected,
     viewed: row.viewed,
     contactedAgent: row.contacted_agent,
+    awaitingAgentCall: row.awaiting_agent_call,
+    interested: row.interested,
     extractionNote: row.extraction_note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

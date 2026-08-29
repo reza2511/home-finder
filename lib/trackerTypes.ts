@@ -28,6 +28,14 @@ export interface TrackerRow {
   rejected: boolean;
   viewed: boolean;
   contactedAgent: boolean;
+  /** Tracked and saved like every other tick box, but carries no row colour
+   * of its own — see components/PropertyTrackerTable.tsx's row-colour
+   * priority (rejected > interested > neither). */
+  awaitingAgentCall: boolean;
+  /** Highlights the whole row light orange when true — UNLESS `rejected` is
+   * also true, in which case rejected's red always wins (see
+   * components/PropertyTrackerTable.tsx). */
+  interested: boolean;
   /** Set when the page couldn't be read at add-time (blocked/error) — shown
    * as a "couldn't read this page" note. Null once every AI field came back
    * fine, or after the operator has filled the row in by hand. */
@@ -59,6 +67,8 @@ export type TrackerRowPatch = Partial<
     | "rejected"
     | "viewed"
     | "contactedAgent"
+    | "awaitingAgentCall"
+    | "interested"
   >
 >;
 

@@ -26,7 +26,7 @@ const STRING_FIELDS = [
   "comment",
   "video",
 ] as const;
-const BOOL_FIELDS = ["rejected", "viewed", "contactedAgent"] as const;
+const BOOL_FIELDS = ["rejected", "viewed", "contactedAgent", "awaitingAgentCall", "interested"] as const;
 
 /** Builds a whitelisted patch from an arbitrary request body — any key
  * that isn't one of TrackerRowPatch's own fields, or that has the wrong

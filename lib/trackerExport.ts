@@ -17,6 +17,8 @@ const HEADER = [
   "Rejected",
   "Viewed",
   "Contacted agent",
+  "Awaiting agent call",
+  "Interested",
   "Note",
 ];
 
@@ -44,6 +46,8 @@ export function exportTrackerToExcel(rows: TrackerRow[]): void {
       r.rejected ? "Yes" : "No",
       r.viewed ? "Yes" : "No",
       r.contactedAgent ? "Yes" : "No",
+      r.awaitingAgentCall ? "Yes" : "No",
+      r.interested ? "Yes" : "No",
       r.extractionNote ?? "",
     ]),
   ];

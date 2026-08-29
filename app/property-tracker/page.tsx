@@ -23,7 +23,13 @@ import type { TrackerBackupSummary, TrackerRow, TrackerRowPatch } from "@/lib/tr
 // scheduleSave below. "Auto-save on every edit" just means no explicit Save
 // button, not literally one request per character.
 const DEBOUNCE_MS = 700;
-const IMMEDIATE_FIELDS = new Set<keyof TrackerRowPatch>(["rejected", "viewed", "contactedAgent"]);
+const IMMEDIATE_FIELDS = new Set<keyof TrackerRowPatch>([
+  "rejected",
+  "viewed",
+  "contactedAgent",
+  "awaitingAgentCall",
+  "interested",
+]);
 
 // Requires login (Stage A auth), same real, server-side session cookie
 // check as /compare and /favourites — a public visitor is redirected to

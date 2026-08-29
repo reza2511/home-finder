@@ -29,6 +29,8 @@ interface TrackerRowDb {
   rejected: boolean;
   viewed: boolean;
   contacted_agent: boolean;
+  awaiting_agent_call: boolean;
+  interested: boolean;
   extraction_note: string | null;
   created_at: string;
   updated_at: string;
@@ -52,6 +54,8 @@ function fromDb(row: TrackerRowDb): TrackerRow {
     rejected: row.rejected,
     viewed: row.viewed,
     contactedAgent: row.contacted_agent,
+    awaitingAgentCall: row.awaiting_agent_call,
+    interested: row.interested,
     extractionNote: row.extraction_note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -59,7 +63,7 @@ function fromDb(row: TrackerRowDb): TrackerRow {
 }
 
 const SELECT_COLUMNS =
-  "id, url, name, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, video, rejected, viewed, contacted_agent, extraction_note, created_at, updated_at";
+  "id, url, name, price, bedrooms, floor, developer, address, view_date, area, postcode, comment, video, rejected, viewed, contacted_agent, awaiting_agent_call, interested, extraction_note, created_at, updated_at";
 
 /** Every tracker row for the fixed account, ordered so the table can render
  * them directly: not-rejected before rejected, each group oldest-added
@@ -132,6 +136,8 @@ const PATCH_KEY_TO_COLUMN: Record<keyof TrackerRowPatch, string> = {
   rejected: "rejected",
   viewed: "viewed",
   contactedAgent: "contacted_agent",
+  awaitingAgentCall: "awaiting_agent_call",
+  interested: "interested",
 };
 
 /** Applies a hand-edit (any subset of TrackerRowPatch's fields) to one row —
