@@ -77,3 +77,12 @@ export interface TrackerBackupSummary {
   capturedAt: string;
   rowCount: number;
 }
+
+/** Property Tracker page-wide display preferences (supabase/migrations/
+ * 0017_tracker_prefs.sql) — not data about any one row. */
+export interface TrackerPrefs {
+  /** "Don't show these again" for the read-error indicator icons in the
+   * Link column (components/PropertyTrackerTable.tsx) — hides them
+   * entirely, for every row, once set. */
+  hideExtractionNotes: boolean;
+}

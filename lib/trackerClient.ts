@@ -1,4 +1,4 @@
-import type { TrackerBackupSummary, TrackerRow, TrackerRowPatch } from "./trackerTypes";
+import type { TrackerBackupSummary, TrackerPrefs, TrackerRow, TrackerRowPatch } from "./trackerTypes";
 
 export async function fetchTracker(): Promise<TrackerRow[]> {
   const res = await fetch("/api/tracker", { cache: "no-store" });
@@ -68,4 +68,28 @@ export async function restoreTrackerBackup(date: string): Promise<TrackerRow[]> 
   }
   const data = await res.json();
   return data.rows;
+}
+
+export async function fetchTrackerPrefs(): Promise<TrackerPrefs> {
+  const res = await fetch("/api/tracker/prefs", { cache: "no-store" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Failed to load preferences (${res.status})`);
+  }
+  const data = await res.json();
+  return data.prefs;
+}
+
+export async function updateTrackerPrefs(patch: Partial<TrackerPrefs>): Promise<TrackerPrefs> {
+  const res = await fetch("/api/tracker/prefs", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Failed to save preference (${res.status})`);
+  }
+  const data = await res.json();
+  return data.prefs;
 }

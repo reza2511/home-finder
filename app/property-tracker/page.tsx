@@ -10,7 +10,9 @@ import {
   deleteTrackerRow,
   fetchTracker,
   fetchTrackerBackups,
+  fetchTrackerPrefs,
   restoreTrackerBackup,
+  updateTrackerPrefs,
   updateTrackerRow,
 } from "@/lib/trackerClient";
 import { exportTrackerToExcel } from "@/lib/trackerExport";
@@ -60,6 +62,11 @@ export default function PropertyTrackerPage() {
   const [backupsError, setBackupsError] = useState<string | null>(null);
   const [restoringDate, setRestoringDate] = useState<string | null>(null);
 
+  // "Don't show these again" for the read-error indicator icons — a
+  // page-wide preference, saved per user (supabase/migrations/
+  // 0017_tracker_prefs.sql), not tied to any one row.
+  const [hideExtractionNotes, setHideExtractionNotes] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     fetchSession()
@@ -71,8 +78,13 @@ export default function PropertyTrackerPage() {
           router.replace("/login");
           return;
         }
-        return fetchTracker().then((r) => {
-          if (!cancelled) setRows(r);
+        return Promise.all([
+          fetchTracker(),
+          fetchTrackerPrefs().catch(() => ({ hideExtractionNotes: false })), // best-effort — a failed prefs load just leaves indicators shown
+        ]).then(([r, prefs]) => {
+          if (cancelled) return;
+          setRows(r);
+          setHideExtractionNotes(prefs.hideExtractionNotes);
         });
       })
       .catch((err) => {
@@ -166,6 +178,18 @@ export default function PropertyTrackerPage() {
     }
   }
 
+  // Optimistic, like every other toggle here — reverted if the save fails.
+  async function handleToggleHideExtractionNotes() {
+    const next = !hideExtractionNotes;
+    setHideExtractionNotes(next);
+    try {
+      await updateTrackerPrefs({ hideExtractionNotes: next });
+    } catch (err) {
+      setHideExtractionNotes(!next);
+      setActionError(err instanceof Error ? err.message : "Failed to save preference");
+    }
+  }
+
   async function handleToggleBackups() {
     const next = !showBackups;
     setShowBackups(next);
@@ -210,8 +234,9 @@ export default function PropertyTrackerPage() {
         <p className="page-subheading">
           Paste a property listing URL to add it — each page is read live and extracted with AI, the same
           approach as the Compare page: only what a page genuinely states is filled in, anything it
-          doesn&apos;t say (or a page that can&apos;t be read) is left blank rather than guessed. Every cell is
-          editable. Private to your account — the public can&apos;t see this page.
+          doesn&apos;t say (or a page that can&apos;t be read) is left blank rather than guessed. Every field is
+          editable except the Link icon itself, which just opens the listing. Private to your account — the
+          public can&apos;t see this page.
         </p>
 
         <div className="tracker-add">
@@ -246,6 +271,18 @@ export default function PropertyTrackerPage() {
           )}
           <button type="button" className="btn btn--ghost" onClick={handleToggleBackups}>
             {showBackups ? "Hide backups" : "Backups"}
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={handleToggleHideExtractionNotes}
+            title={
+              hideExtractionNotes
+                ? "Read-error indicator icons (⚠/ⓘ) are currently hidden"
+                : "Hides the ⚠/ⓘ read-error indicator icons in the Link column, everywhere, from now on"
+            }
+          >
+            {hideExtractionNotes ? "Show read-error indicators" : "Don't show these again"}
           </button>
         </div>
 
@@ -286,7 +323,13 @@ export default function PropertyTrackerPage() {
         {rows === null ? (
           <p className="listings-loading">Loading tracker…</p>
         ) : (
-          <PropertyTrackerTable rows={rows} onEdit={handleEdit} onDelete={handleDelete} savingIds={savingIds} />
+          <PropertyTrackerTable
+            rows={rows}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            savingIds={savingIds}
+            hideExtractionNotes={hideExtractionNotes}
+          />
         )}
       </main>
     </>

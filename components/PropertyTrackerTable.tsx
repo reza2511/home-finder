@@ -11,6 +11,9 @@ interface Props {
   onEdit: (id: string, patch: TrackerRowPatch) => void;
   onDelete: (id: string) => void;
   savingIds: Set<string>;
+  /** "Don't show these again" preference — when true, the read-error
+   * indicator icon is suppressed entirely, for every row. */
+  hideExtractionNotes: boolean;
 }
 
 const TEXT_FIELDS: { key: keyof TrackerRowPatch; label: string; placeholder?: string }[] = [
@@ -33,7 +36,7 @@ function rowClassName(row: TrackerRow): string {
   return "";
 }
 
-export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds }: Props) {
+export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds, hideExtractionNotes }: Props) {
   const sorted = sortTrackerRows(rows);
 
   if (sorted.length === 0) {
@@ -66,40 +69,33 @@ export default function PropertyTrackerTable({ rows, onEdit, onDelete, savingIds
             <tr key={row.id} className={rowClassName(row)}>
               <td className="tracker-table__link-cell">
                 <div className="tracker-table__link-row">
-                  <input
-                    type="text"
-                    className="tracker-table__input tracker-table__input--url"
-                    value={row.url}
-                    placeholder="Property URL"
-                    onChange={(e) => onEdit(row.id, { url: e.target.value })}
-                  />
                   <a
                     href={row.url || undefined}
                     target="_blank"
                     rel="noreferrer"
                     className={`tracker-table__open-link${row.url ? "" : " tracker-table__open-link--disabled"}`}
                     aria-label="Open listing"
+                    title="Open listing"
                     onClick={(e) => {
                       if (!row.url) e.preventDefault();
                     }}
                   >
                     ↗
                   </a>
+                  {!hideExtractionNotes && row.extractionNote && (
+                    <span
+                      className={
+                        row.extractionNote.startsWith("Couldn't read")
+                          ? "tracker-table__note-icon tracker-table__note-icon--error"
+                          : "tracker-table__note-icon tracker-table__note-icon--info"
+                      }
+                      title={row.extractionNote}
+                      aria-label={row.extractionNote}
+                    >
+                      {row.extractionNote.startsWith("Couldn't read") ? "⚠" : "ⓘ"}
+                    </span>
+                  )}
                 </div>
-                {row.extractionNote && (
-                  <div
-                    className={
-                      row.extractionNote.startsWith("Couldn't read")
-                        ? "tracker-table__note tracker-table__note--error"
-                        : "tracker-table__note tracker-table__note--info"
-                    }
-                    title={row.extractionNote}
-                  >
-                    {row.extractionNote.startsWith("Couldn't read")
-                      ? "⚠ Couldn't read this page — fill in manually"
-                      : "ℹ AI extraction unavailable — some fields may be missing"}
-                  </div>
-                )}
               </td>
 
               <td>

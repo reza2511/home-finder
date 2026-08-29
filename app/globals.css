@@ -2093,7 +2093,8 @@ button {
 }
 
 .tracker-table__link-cell {
-  min-width: 180px;
+  min-width: 50px;
+  width: 50px;
 }
 
 .tracker-table__link-row {
@@ -2106,12 +2107,14 @@ button {
   flex-shrink: 0;
   color: var(--color-primary);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 17px;
+  font-weight: 700;
   padding: 2px 4px;
+  border-radius: 4px;
 }
 
-.tracker-table__open-link:hover {
-  text-decoration: underline;
+.tracker-table__open-link:hover:not(.tracker-table__open-link--disabled) {
+  background: var(--color-bg);
 }
 
 .tracker-table__open-link--disabled {
@@ -2149,17 +2152,26 @@ button {
   white-space: nowrap;
 }
 
-.tracker-table__note {
-  margin-top: 4px;
-  font-size: 11px;
+/* Faint by default — deliberately not bold/attention-grabbing, since this
+   is a hover-reveal indicator (the actual message is the native `title`
+   tooltip), not something meant to read at a glance the way the row's own
+   red/orange colouring already does. */
+.tracker-table__note-icon {
+  flex-shrink: 0;
+  font-size: 12px;
   cursor: help;
+  opacity: 0.65;
 }
 
-.tracker-table__note--error {
+.tracker-table__note-icon:hover {
+  opacity: 1;
+}
+
+.tracker-table__note-icon--error {
   color: var(--color-danger-text);
 }
 
-.tracker-table__note--info {
+.tracker-table__note-icon--info {
   color: var(--color-stale-text);
 }
 
