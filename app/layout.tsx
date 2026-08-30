@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Home Finder",
+  title: "Reza Property Finder",
   description: "Aggregated rental listings from multiple sources",
 };
 

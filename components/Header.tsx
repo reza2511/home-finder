@@ -122,7 +122,7 @@ export default function Header({
           <span className="app-header__logo" aria-hidden>
             🏠
           </span>
-          <span className="app-header__title">Home Finder</span>
+          <span className="app-header__title">Reza Property Finder</span>
         </div>
       </div>
       <div className="app-header__actions">
